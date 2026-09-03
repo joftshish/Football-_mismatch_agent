@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 BASE = "https://site.api.espn.com/apis"
-LEAGUES = {"eng.1": "انگلیس", "esp.1": "اسپانیا", "ger.1": "آلمان", "ita.1": "ایتالیا", "fra.1": "فرانسه"}
+LEAGUES = {"eng.1": "انگلیس", "esp.1": "اسپانیا", "ger.1": "آلمان", "ita.1": "ایتالیا", "fra.1": "فرانسه", "por.1": "پرتغال", "ksa.1": "عربستان"}
 
 DEFAULT_TEAM = {"rank": 17, "played": 10, "wins": 3, "gf": 12, "ga": 20}
 
@@ -30,7 +30,7 @@ def power(rank, d, home):
     base = 100 - int(rank) * 3
     played = d.get("played", 0)
     if played > 0:
-        form_bonus = ((d.get("wins", 0) / played) - 0.4) * 15
+        form_bonus = (d.get("wins", 0) / played - 0.4) * 15
         gd_bonus = max(-10, min(10, ((d.get("gf", 0) - d.get("ga", 0)) / played) * 5))
     else:
         form_bonus = 0
@@ -102,7 +102,7 @@ def main():
         n, c = stats[lab]
         pct = round(c / n * 100) if n else 0
         lines.append(f"اختلاف {lab}: {n} بازی، برد قوی‌تر {pct}%")
-    report = "📊 کالیبراسیون آستانه\n(تیم‌های تازه‌صعود = رتبه 17)\n\n" + "\n".join(lines) + f"\n\nکل بازی‌ها: {total} | مساوی: {draws}\n\nهر بازه‌ای که درصدش یهو بالا پرید، آستانه طلاییه 🏆"
+    report = "📊 کالیبراسیون (۷ لیگ)\n" + "\n".join(lines) + f"\n\nکل: {total} | مساوی: {draws}"
     send(report)
     print(report)
 
@@ -112,5 +112,5 @@ if __name__ == "__main__":
     except Exception:
         e = traceback.format_exc()
         print(e)
-        send("❌ خطای کالیبراسیون:\n" + e[-2000:])
+        send("❌ خطا:\n" + e[-2000:])
         raise
