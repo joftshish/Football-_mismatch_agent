@@ -57,9 +57,11 @@ def fixtures():
     return out
 
 def power(rank, d, home):
+    if isinstance(rank, dict):
+        rank = rank.get("rank", 14)
     played = d.get("played", 0)
     form = ((d.get("wins", 0) / played) - 0.4) * 20 if played else 0
-    return max(0, min(100, 100 - rank * 3 + form + (8 if home else 0)))
+    return max(0, min(100, 100 - int(rank) * 3 + form + (8 if home else 0)))
 
 def send(text):
     try:
@@ -99,8 +101,8 @@ def main():
         hd, ad = t.get(m["home"], {}), t.get(m["away"], {})
         h_low = hd.get("played", 0) < 5
         a_low = ad.get("played", 0) < 5
-        hr = hd.get("rank", 20) if not h_low else last.get(m["slug"], {}).get(m["home"], 14)
-        ar = ad.get("rank", 20) if not a_low else last.get(m["slug"], {}).get(m["away"], 14)
+        hr = hd.get("rank", 20) if not h_low else last.get(m["slug"], {}).get(m["home"], {}).get("rank", 14)
+        ar = ad.get("rank", 20) if not a_low else last.get(m["slug"], {}).get(m["away"], {}).get("rank", 14)
         hp, ap = power(hr, hd, True), power(ar, ad, False)
         gap = abs(hp - ap)
         if gap >= 80:
