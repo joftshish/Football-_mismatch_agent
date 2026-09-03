@@ -65,9 +65,12 @@ def power(rank, d, home):
     form = ((d.get("wins", 0) / played) - 0.4) * 20 if played else 0
     return max(0, min(100, 100 - int(rank) * 3 + form + (8 if home else 0)))
 
-def send(text):
+def send(text, html=True):
     try:
-        r = httpx.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"}, timeout=10)
+        payload = {"chat_id": CHAT_ID, "text": text}
+        if html:
+            payload["parse_mode"] = "HTML"
+        r = httpx.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json=payload, timeout=10)
         print("TG status:", r.status_code, r.text[:150])
         return r.status_code == 200
     except Exception as ex:
@@ -97,12 +100,13 @@ def main():
     now = datetime.now(timezone.utc)
     ls_year = (now.year if now.month >= 7 else now.year - 1) - 1
     fs = fixtures()
-    print("fixtures found:", len(fs))
     cur = standings()
     last = standings(ls_year)
-    print("cur table sizes:", {k: len(v) for k, v in cur.items()})
-    print("last table sizes:", {k: len(v) for k, v in last.items()})
+    cur_sz = {k: len(v) for k, v in cur.items()}
+    last_sz = {k: len(v) for k, v in last.items()}
+    print("fixtures:", len(fs), "cur:", cur_sz, "last:", last_sz)
     sent = 0
+    rows = []
     for m in fs:
         t = cur.get(m["slug"], {})
         hd, ad = t.get(m["home"], {}), t.get(m["away"], {})
@@ -120,7 +124,7 @@ def main():
             lab = "نابرابر 🟠"
         else:
             lab = None
-        print(m["home"], "vs", m["away"], "| gap:", round(gap, 1), "|", lab or "عادی")
+        rows.append((gap, f"{m['home']} - {m['away']} | {round(gap)} | {lab or '-'}"))
         if lab and m["id"] not in noted:
             a = {"league": m["league"], "date": m["date"], "home": m["home"], "away": m["away"], "hr": hr, "ar": ar, "hp": hp, "ap": ap, "gap": gap, "label": lab, "low": h_low or a_low}
             if send(msg(a)):
@@ -128,6 +132,10 @@ def main():
                 sent += 1
     state["notified"] = noted
     json.dump(state, open("state.json", "w"))
+    rows.sort(reverse=True)
+    top = "\n".join(r[1] for r in rows[:6])
+    summary = f"📊 گزارش ایجنت\nتعداد بازی‌ها: {len(fs)}\nجدول فعلی: {cur_sz}\nجدول فصل قبل: {last_sz}\nبالاترین اختلاف‌ها:\n{top}\nنوتیف فرستاده شد: {sent}"
+    send(summary, html=False)
     print("=== done, sent:", sent, "===")
 
 if __name__ == "__main__":
