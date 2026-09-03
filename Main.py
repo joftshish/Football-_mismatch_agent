@@ -5,11 +5,13 @@ TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 BASE = "https://site.api.espn.com/apis"
 TZ = timezone(timedelta(hours=3, minutes=30))
-LEAGUES = {"eng.1": "لیگ برتر انگلیس", "esp.1": "لالیگا", "ger.1": "بوندس‌لیگا", "ita.1": "سری آ", "fra.1": "لیگ ۱ فرانسه"}
+LEAGUES = {"eng.1": "🏴󠁥 لیگ برتر انگلیس", "esp.1": "🇪🇸 لالیگا", "ger.1": "🇩🇪 بوندس‌لیگا", "ita.1": "🇮🇹 سری آ", "fra.1": "🇫🇷 لیگ ۱ فرانسه", "por.1": "🇵🇹 لیگ پرتغال", "ksa.1": "🇸🇦 لیگ عربستان"}
 WD = ["شنبه", "یکشنبه", "دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه"]
 MO = ["فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور", "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"]
 
 MISMATCH_THRESHOLD = 55
+MIN_PLAYED = 5
+DEFAULT_RANK = 17
 
 def jalali(dt):
     try:
@@ -32,14 +34,7 @@ def standings(season=None):
                         name = (e.get("team") or {}).get("displayName", "")
                         st = {s.get("name"): s.get("value", 0) for s in e.get("stats", [])}
                         if name:
-                            t[name] = {
-                                "rank": int(st.get("rank", 20)),
-                                "played": int(st.get("gamesPlayed", 0)),
-                                "wins": int(st.get("wins", 0)),
-                                "points": int(st.get("points", 0)),
-                                "gf": int(st.get("pointsFor", 0)),
-                                "ga": int(st.get("pointsAgainst", 0)),
-                            }
+                            t[name] = {"rank": int(st.get("rank", DEFAULT_RANK)), "played": int(st.get("gamesPlayed", 0)), "wins": int(st.get("wins", 0)), "gf": int(st.get("pointsFor", 0)), "ga": int(st.get("pointsAgainst", 0))}
                 if t:
                     break
             except Exception as ex:
@@ -69,21 +64,16 @@ def fixtures():
 
 def power(rank, d, home):
     if isinstance(rank, dict):
-        rank = rank.get("rank", 14)
+        rank = rank.get("rank", DEFAULT_RANK)
     base = 100 - int(rank) * 3
     played = d.get("played", 0)
     if played > 0:
-        win_ratio = d.get("wins", 0) / played
-        form_bonus = (win_ratio - 0.4) * 15
-        gf = d.get("gf", 0)
-        ga = d.get("ga", 0)
-        gd_per_game = (gf - ga) / played
-        gd_bonus = max(-10, min(10, gd_per_game * 5))
+        form_bonus = (d.get("wins", 0) / played - 0.4) * 15
+        gd_bonus = max(-10, min(10, ((d.get("gf", 0) - d.get("ga", 0)) / played) * 5))
     else:
         form_bonus = 0
         gd_bonus = 0
-    home_bonus = 8 if home else 0
-    return max(0, min(100, base + form_bonus + gd_bonus + home_bonus))
+    return max(0, min(100, base + form_bonus + gd_bonus + (8 if home else 0)))
 
 def send(text, html=True):
     try:
@@ -91,7 +81,6 @@ def send(text, html=True):
         if html:
             payload["parse_mode"] = "HTML"
         r = httpx.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json=payload, timeout=10)
-        print("TG status:", r.status_code, r.text[:150])
         return r.status_code == 200
     except Exception as ex:
         print("tg err", ex)
@@ -103,13 +92,13 @@ def msg(a):
         jd, tm = jalali(dt)
     except Exception:
         jd, tm = a["date"], ""
-    t = f"⚔️ <b>بازی نابرابر!</b>\n\n🏆 {a['league']}\n📅 {jd} — {tm}\n\n⚽ <b>{a['home']}</b> (رتبه {a['hr']}) قدرت {a['hp']}\n🆚 <b>{a['away']}</b> (رتبه {a['ar']}) قدرت {a['ap']}\n\n📊 اختلاف: <b>{a['gap']}/100</b>\n📋 {a['label']}"
+    t = f"⚔️ <b>بازی نابرابر تشخیص داده شد!</b>\n\n🏆 {a['league']}\n📅 {jd} — ساعت {tm}\n\n⚽ <b>{a['home']}</b> (رتبه {a['hr']}) — قدرت {a['hp']}\n🆚 <b>{a['away']}</b> (رتبه {a['ar']}) — قدرت {a['ap']}\n\n📊 اختلاف قدرت: <b>{a['gap']}/100</b>\n📋 وضعیت: {a['label']}"
     if a["low"]:
         t += "\n⚠️ داده فصل جاری کم است؛ رتبه فصل قبل مبناست"
     return t
 
 def main():
-    print("=== start ===")
+    print("=== start v9 ===")
     state = {}
     if os.path.exists("state.json"):
         try:
@@ -130,18 +119,16 @@ def main():
     for m in fs:
         t = cur.get(m["slug"], {})
         hd, ad = t.get(m["home"], {}), t.get(m["away"], {})
-        h_low = hd.get("played", 0) < 5
-        a_low = ad.get("played", 0) < 5
-        hr = hd.get("rank", 20) if not h_low else last.get(m["slug"], {}).get(m["home"], {}).get("rank", 14)
-        ar = ad.get("rank", 20) if not a_low else last.get(m["slug"], {}).get(m["away"], {}).get("rank", 14)
+        h_low = hd.get("played", 0) < MIN_PLAYED
+        a_low = ad.get("played", 0) < MIN_PLAYED
+        hr = hd.get("rank", DEFAULT_RANK) if not h_low else last.get(m["slug"], {}).get(m["home"], {}).get("rank", DEFAULT_RANK)
+        ar = ad.get("rank", DEFAULT_RANK) if not a_low else last.get(m["slug"], {}).get(m["away"], {}).get("rank", DEFAULT_RANK)
         hp, ap = power(hr, hd, True), power(ar, ad, False)
         gap = abs(hp - ap)
-        if gap >= 80:
-            lab = "کاملاً نابرابر ⚫"
-        elif gap >= 65:
-            lab = "به‌وضوح نابرابر 🔴"
+        if gap >= 65:
+            lab = "کاملاً نابرابر 🔴"
         elif gap >= MISMATCH_THRESHOLD:
-            lab = "نابرابر 🟠"
+            lab = "به‌وضوح نابرابر 🟠"
         else:
             lab = None
         rows.append((gap, f"{m['home']} - {m['away']} | {round(gap)} | {lab or '-'}"))
@@ -153,8 +140,8 @@ def main():
     state["notified"] = noted
     json.dump(state, open("state.json", "w"))
     rows.sort(reverse=True)
-    top = "\n".join(r[1] for r in rows[:6])
-    summary = f"📊 گزارش ایجنت\nتعداد بازی‌ها: {len(fs)}\nجدول فعلی: {cur_sz}\nجدول فصل قبل: {last_sz}\nبالاترین اختلاف‌ها:\n{top}\nنوتیف فرستاده شد: {sent}"
+    top = "\n".join(r[1] for r in rows[:8])
+    summary = f"📊 گزارش ایجنت (آستانه {MISMATCH_THRESHOLD})\nتعداد بازی‌ها: {len(fs)}\nجدول فعلی: {cur_sz}\nجدول فصل قبل: {last_sz}\nبالاترین اختلاف‌ها:\n{top}\nنوتیف فرستاده شد: {sent}"
     send(summary, html=False)
     print("=== done, sent:", sent, "===")
 
