@@ -9,6 +9,8 @@ LEAGUES = {"eng.1": "لیگ برتر انگلیس", "esp.1": "لالیگا", "ge
 WD = ["شنبه", "یکشنبه", "دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه"]
 MO = ["فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور", "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"]
 
+MISMATCH_THRESHOLD = 55
+
 def jalali(dt):
     try:
         import jdatetime
@@ -30,7 +32,14 @@ def standings(season=None):
                         name = (e.get("team") or {}).get("displayName", "")
                         st = {s.get("name"): s.get("value", 0) for s in e.get("stats", [])}
                         if name:
-                            t[name] = {"rank": int(st.get("rank", 20)), "played": int(st.get("gamesPlayed", 0)), "wins": int(st.get("wins", 0))}
+                            t[name] = {
+                                "rank": int(st.get("rank", 20)),
+                                "played": int(st.get("gamesPlayed", 0)),
+                                "wins": int(st.get("wins", 0)),
+                                "points": int(st.get("points", 0)),
+                                "gf": int(st.get("pointsFor", 0)),
+                                "ga": int(st.get("pointsAgainst", 0)),
+                            }
                 if t:
                     break
             except Exception as ex:
@@ -61,9 +70,20 @@ def fixtures():
 def power(rank, d, home):
     if isinstance(rank, dict):
         rank = rank.get("rank", 14)
+    base = 100 - int(rank) * 3
     played = d.get("played", 0)
-    form = ((d.get("wins", 0) / played) - 0.4) * 20 if played else 0
-    return max(0, min(100, 100 - int(rank) * 3 + form + (8 if home else 0)))
+    if played > 0:
+        win_ratio = d.get("wins", 0) / played
+        form_bonus = (win_ratio - 0.4) * 15
+        gf = d.get("gf", 0)
+        ga = d.get("ga", 0)
+        gd_per_game = (gf - ga) / played
+        gd_bonus = max(-10, min(10, gd_per_game * 5))
+    else:
+        form_bonus = 0
+        gd_bonus = 0
+    home_bonus = 8 if home else 0
+    return max(0, min(100, base + form_bonus + gd_bonus + home_bonus))
 
 def send(text, html=True):
     try:
@@ -120,7 +140,7 @@ def main():
             lab = "کاملاً نابرابر ⚫"
         elif gap >= 65:
             lab = "به‌وضوح نابرابر 🔴"
-        elif gap >= 45:
+        elif gap >= MISMATCH_THRESHOLD:
             lab = "نابرابر 🟠"
         else:
             lab = None
