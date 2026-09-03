@@ -14,7 +14,7 @@ jobs:
       - name: Install
         run: pip install httpx
       - name: Run backtest
-        run: run: python BACKTEST.PY
+        run: python BACKTEST.PY
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
