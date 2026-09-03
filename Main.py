@@ -20,20 +20,22 @@ def jalali(dt):
 def standings(season=None):
     out = {}
     for slug in LEAGUES:
-        try:
-            p = {"season": season} if season else {}
-            r = httpx.get(f"{BASE}/v2/sports/soccer/{slug}/standings", params=p, timeout=15).json()
-            t = {}
-            for ch in r.get("children", []):
-                for e in ch.get("standings", {}).get("entries", []):
-                    name = (e.get("team") or {}).get("displayName", "")
-                    st = {s.get("name"): s.get("value", 0) for s in e.get("stats", [])}
-                    if name:
-                        t[name] = {"rank": int(st.get("rank", 20)), "played": int(st.get("gamesPlayed", 0)), "wins": int(st.get("wins", 0))}
-            out[slug] = t
-        except Exception as ex:
-            print("standings err", slug, ex)
-            out[slug] = {}
+        t = {}
+        tries = [{"season": season, "seasontype": 1}, {"season": season}] if season else [{}]
+        for p in tries:
+            try:
+                r = httpx.get(f"{BASE}/v2/sports/soccer/{slug}/standings", params=p, timeout=15).json()
+                for ch in r.get("children", []):
+                    for e in ch.get("standings", {}).get("entries", []):
+                        name = (e.get("team") or {}).get("displayName", "")
+                        st = {s.get("name"): s.get("value", 0) for s in e.get("stats", [])}
+                        if name:
+                            t[name] = {"rank": int(st.get("rank", 20)), "played": int(st.get("gamesPlayed", 0)), "wins": int(st.get("wins", 0))}
+                if t:
+                    break
+            except Exception as ex:
+                print("standings err", slug, ex)
+        out[slug] = t
     return out
 
 def fixtures():
@@ -66,6 +68,7 @@ def power(rank, d, home):
 def send(text):
     try:
         r = httpx.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"}, timeout=10)
+        print("TG status:", r.status_code, r.text[:150])
         return r.status_code == 200
     except Exception as ex:
         print("tg err", ex)
@@ -83,7 +86,7 @@ def msg(a):
     return t
 
 def main():
-    print("start")
+    print("=== start ===")
     state = {}
     if os.path.exists("state.json"):
         try:
@@ -93,10 +96,14 @@ def main():
     noted = state.get("notified", [])
     now = datetime.now(timezone.utc)
     ls_year = (now.year if now.month >= 7 else now.year - 1) - 1
+    fs = fixtures()
+    print("fixtures found:", len(fs))
     cur = standings()
     last = standings(ls_year)
+    print("cur table sizes:", {k: len(v) for k, v in cur.items()})
+    print("last table sizes:", {k: len(v) for k, v in last.items()})
     sent = 0
-    for m in fixtures():
+    for m in fs:
         t = cur.get(m["slug"], {})
         hd, ad = t.get(m["home"], {}), t.get(m["away"], {})
         h_low = hd.get("played", 0) < 5
@@ -113,6 +120,7 @@ def main():
             lab = "نابرابر 🟠"
         else:
             lab = None
+        print(m["home"], "vs", m["away"], "| gap:", round(gap, 1), "|", lab or "عادی")
         if lab and m["id"] not in noted:
             a = {"league": m["league"], "date": m["date"], "home": m["home"], "away": m["away"], "hr": hr, "ar": ar, "hp": hp, "ap": ap, "gap": gap, "label": lab, "low": h_low or a_low}
             if send(msg(a)):
@@ -120,7 +128,7 @@ def main():
                 sent += 1
     state["notified"] = noted
     json.dump(state, open("state.json", "w"))
-    print("done", sent)
+    print("=== done, sent:", sent, "===")
 
 if __name__ == "__main__":
     try:
