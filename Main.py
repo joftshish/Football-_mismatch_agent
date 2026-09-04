@@ -3,7 +3,7 @@ import traceback
 from datetime import datetime, timezone
 
 def main():
-    print("=== v13 ===")
+    print("=== v14 ===")
     st = C.load_state()
     noted = st.setdefault("notified", [])
     known = st.setdefault("known_poly", [])
@@ -19,11 +19,15 @@ def main():
     print("fixtures:", len(fx), "poly:", len(pev))
     vb = mm = wl = skipped = 0
     rows = []
+    dbg = []
     for m in fx:
         c = C.compute(m, cur, last, tr)
         if not c:
             continue
         ev = C.find_poly(pev, m["home"], m["away"], m["sport"])
+        raw = ""
+        if not ev:
+            ev, raw = C.search_poly(m["home"], m["away"], m["sport"])
         ph = pa = None
         if ev:
             ph, pa = C.poly_prices(ev, m["home"], m["away"], m["sport"])
@@ -50,6 +54,8 @@ def main():
                     known.append(eid)
         else:
             skipped += 1
+            if raw and len(dbg) < 2:
+                dbg.append(f"{m['home']}-{m['away']}: {raw}")
             key = f"{m['home']}|{m['away']}"
             rows.append((c["gap"], f"{m['home']} - {m['away']} | {round(c['gap'])} | بدون بازار"))
             if key not in watch_noted:
@@ -61,7 +67,8 @@ def main():
     if vb or mm or wl or st.get("last_summary") != today:
         rows.sort(reverse=True)
         top = "\n".join(r[1] for r in rows[:8]) or "—"
-        C.send(f"📊 گزارش ایجنت v13\nبازی‌ها: {len(fx)} | با بازار: {len(fx)-skipped} | بدون بازار: {skipped}\n💰 Value: {vb} | ⚔️ نابرابر: {mm} | 👀 Watchlist: {wl}\n\nبرترین‌ها:\n{top}", html=False)
+        extra = ("\n\n🔬 " + "\n".join(dbg)) if dbg else ""
+        C.send(f"📊 گزارش ایجنت v14\nبازی‌ها: {len(fx)} | بدون بازار: {skipped}\n💰 Value: {vb} | ⚔️ نابرابر: {mm} | 👀 Watchlist: {wl}\n\nبرترین‌ها:\n{top}{extra}", html=False)
         st["last_summary"] = today
     C.save_state(st)
     print("done", vb, mm, wl)
