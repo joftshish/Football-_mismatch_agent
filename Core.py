@@ -6,7 +6,7 @@ CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 ESPN = "https://site.api.espn.com/apis"
 POLY = "https://gamma-api.polymarket.com"
 TZ = timezone(timedelta(hours=3, minutes=30))
-SOCCER = {"eng.1": "🏴 لیگ برتر انگلیس", "esp.1": "🇪🇸 لالیگا", "ger.1": "🇩 بوندس‌لیگا", "ita.1": "🇮🇹 سری آ", "fra.1": "🇫🇷 لیگ ۱", "por.1": "🇵🇹 پرتغال", "ksa.1": "🇸 عربستان", "eng.2": "🏴 Championship", "esp.2": "🇪🇸 Segunda"}
+SOCCER = {"eng.1": "🏴 لیگ برتر انگلیس", "esp.1": "🇪 لالیگا", "ger.1": "🇩🇪 بوندس‌لیگا", "ita.1": "🇮🇹 سری آ", "fra.1": "🇫🇷 لیگ ۱", "por.1": "🇵🇹 پرتغال", "ksa.1": "🇸🇦 عربستان", "eng.2": "🏴 Championship", "esp.2": "🇪🇸 Segunda"}
 TENNIS = {"atp": "🎾 ATP", "wta": "🎾 WTA"}
 WD = ["شنبه", "یکشنبه", "دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه"]
 MO = ["فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور", "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"]
@@ -137,7 +137,16 @@ def tennis_power(rank):
 def keys(name, sport):
     n = name.lower().strip()
     parts = n.split()
-    return [n, parts[0] if sport == "soccer" else parts[-1]]
+    ks = [n]
+    if parts:
+        ks.append(parts[0])
+        if len(parts) > 1:
+            ks.append(parts[-1])
+    out = []
+    for k in ks:
+        if len(k) >= 3 and k not in out:
+            out.append(k)
+    return out or [n]
 
 def poly_events():
     evs = []
@@ -151,6 +160,20 @@ def poly_events():
         except Exception as ex:
             print("poly err", tag, ex)
     return evs
+
+def search_poly(home, away, sport):
+    kh, ka = keys(home, sport), keys(away, sport)
+    try:
+        d = httpx.get(f"{POLY}/public-search", params={"q": f"{home} {away}", "limit": 10}, timeout=15).json()
+    except Exception:
+        return None, ""
+    evs = d.get("events") or (d.get("data") or {}).get("events") or []
+    for ev in evs:
+        t = (ev.get("title") or "").lower()
+        if any(h in t for h in kh) and any(a in t for a in ka):
+            ev["_tag"] = sport
+            return ev, ""
+    return None, json.dumps(d, ensure_ascii=False)[:250]
 
 def get_markets(ev):
     mks = ev.get("markets") or []
@@ -189,6 +212,12 @@ def poly_prices(ev, home, away, sport):
                 elif any(k in q for k in ka):
                     pa = float(pr[0])
                     ph = round(1 - pa, 4)
+            if ph is None and pa is None and len(oc) == 3:
+                low = [str(o).lower() for o in oc]
+                if "draw" in low:
+                    idx = [i for i in range(3) if low[i] != "draw"]
+                    ph = float(pr[idx[0]])
+                    pa = float(pr[idx[1]])
             if ph is not None and pa is not None:
                 return ph, pa
         except Exception:
