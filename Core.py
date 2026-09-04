@@ -6,7 +6,7 @@ CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 ESPN = "https://site.api.espn.com/apis"
 POLY = "https://gamma-api.polymarket.com"
 TZ = timezone(timedelta(hours=3, minutes=30))
-SOCCER = {"eng.1": "🏴 لیگ برتر انگلیس", "esp.1": "🇪🇸 لالیگا", "ger.1": "🇩🇪 بوندس‌لیگا", "ita.1": "🇮🇹 سری آ", "fra.1": "🇫🇷 لیگ ۱", "por.1": "🇵🇹 پرتغال", "ksa.1": "🇸🇦 عربستان", "eng.2": "🏴 Championship", "esp.2": "🇪 Segunda"}
+SOCCER = {"eng.1": "🏴 لیگ برتر انگلیس", "esp.1": "🇪🇸 لالیگا", "ger.1": "🇩 بوندس‌لیگا", "ita.1": "🇮🇹 سری آ", "fra.1": "🇫🇷 لیگ ۱", "por.1": "🇵🇹 پرتغال", "ksa.1": "🇸 عربستان", "eng.2": "🏴 Championship", "esp.2": "🇪🇸 Segunda"}
 TENNIS = {"atp": "🎾 ATP", "wta": "🎾 WTA"}
 WD = ["شنبه", "یکشنبه", "دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه"]
 MO = ["فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور", "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"]
@@ -152,9 +152,20 @@ def poly_events():
             print("poly err", tag, ex)
     return evs
 
+def get_markets(ev):
+    mks = ev.get("markets") or []
+    if not mks:
+        try:
+            d = httpx.get(f"{POLY}/markets", params={"event_id": ev.get("id")}, timeout=15).json()
+            if isinstance(d, list):
+                mks = d
+        except Exception:
+            mks = []
+    return mks
+
 def poly_prices(ev, home, away, sport):
     kh, ka = keys(home, sport), keys(away, sport)
-    for mk in ev.get("markets", []):
+    for mk in get_markets(ev):
         try:
             oc, pr = mk.get("outcomes"), mk.get("outcomePrices")
             if isinstance(oc, str):
@@ -165,16 +176,28 @@ def poly_prices(ev, home, away, sport):
                 continue
             ph = pa = None
             for i, o in enumerate(oc):
-                ol = o.lower()
+                ol = str(o).lower()
                 if any(k in ol for k in kh):
                     ph = float(pr[i])
                 elif any(k in ol for k in ka):
                     pa = float(pr[i])
+            if (ph is None or pa is None) and len(oc) == 2 and str(oc[0]).lower() == "yes":
+                q = ((mk.get("question") or "") + " " + (mk.get("groupItemTitle") or "")).lower()
+                if any(k in q for k in kh):
+                    ph = float(pr[0])
+                    pa = round(1 - ph, 4)
+                elif any(k in q for k in ka):
+                    pa = float(pr[0])
+                    ph = round(1 - pa, 4)
             if ph is not None and pa is not None:
                 return ph, pa
         except Exception:
             continue
     return None, None
+
+def poly_link(ev):
+    s = ev.get("slug") or ""
+    return f"https://polymarket.com/event/{s}" if s else None
 
 def find_poly(evlist, home, away, sport):
     kh, ka = keys(home, sport), keys(away, sport)
@@ -183,6 +206,30 @@ def find_poly(evlist, home, away, sport):
         if any(h in t for h in kh) and any(a in t for a in ka):
             return ev
     return None
+
+def compute(m, cur, last, tr):
+    if m["sport"] == "soccer":
+        t = cur.get(m["slug"], {})
+        hd, ad = t.get(m["home"], {}), t.get(m["away"], {})
+        hl = hd.get("played", 0) < 5
+        al = ad.get("played", 0) < 5
+        hr = hd.get("rank", DEFAULT_RANK) if not hl else last.get(m["slug"], {}).get(m["home"], {}).get("rank", DEFAULT_RANK)
+        ar = ad.get("rank", DEFAULT_RANK) if not al else last.get(m["slug"], {}).get(m["away"], {}).get("rank", DEFAULT_RANK)
+        hp, ap = soccer_power(hr, hd, True), soccer_power(ar, ad, False)
+        low = hl or al
+    else:
+        hr = tr.get(m["slug"], {}).get(m["home"].lower().split()[-1])
+        ar = tr.get(m["slug"], {}).get(m["away"].lower().split()[-1])
+        if not hr or not ar:
+            return None
+        hp, ap = tennis_power(hr), tennis_power(ar)
+        low = False
+    gap = abs(hp - ap)
+    thr = SOCCER_GAP if m["sport"] == "soccer" else TENNIS_GAP
+    if gap < thr:
+        return None
+    sh = hp > ap
+    return {"gap": gap, "thr": thr, "stronger": m["home"] if sh else m["away"], "sh": sh, "prob": model_prob(gap), "low": low}
 
 def load_state():
     if os.path.exists("state.json"):
@@ -195,6 +242,8 @@ def load_state():
 def save_state(s):
     s["known_poly"] = s.get("known_poly", [])[-500:]
     s["notified"] = s.get("notified", [])[-500:]
+    s["watch_noted"] = s.get("watch_noted", [])[-300:]
+    s["watchlist"] = s.get("watchlist", [])[-100:]
     json.dump(s, open("state.json", "w"))
 
 def notify(emoji, a):
@@ -209,4 +258,16 @@ def notify(emoji, a):
     t += f"\n📋 {a['label']}"
     if a.get("note"):
         t += f"\n{a['note']}"
+    if a.get("link"):
+        t += f"\n\n🔗 <a href=\"{a['link']}\">باز کردن مستقیم بت در Polymarket</a>"
+    return send(t)
+
+def notify_watch(m, c):
+    try:
+        dt = datetime.fromisoformat(m["date"].replace("Z", "+00:00")).astimezone(TZ)
+        jd, tm = jalali(dt)
+    except Exception:
+        jd, tm = m["date"], ""
+    icon = "🎾" if m["sport"] == "tennis" else "⚽"
+    t = f"👀 <b>بازی نابرابر — منتظر بازار Polymarket</b>\n\n🏆 {m['league']}\n📅 {jd} — ساعت {tm}\n\n{icon} <b>{m['home']}</b> vs <b>{m['away']}</b>\n\n📊 مدل: {round(c['prob']*100)}% برد {c['stronger']}\n💰 بازار: هنوز باز نشده\n\n⏰ Fast Scan هر 5 دقیقه چک می‌کنه؛ به محض باز شدن، نوتیف ⚡ با لینک مستقیم می‌گیری"
     return send(t)
