@@ -6,10 +6,11 @@ CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 ESPN = "https://site.api.espn.com/apis"
 POLY = "https://gamma-api.polymarket.com"
 TZ = timezone(timedelta(hours=3, minutes=30))
-SOCCER = {"eng.1": "🏴 لیگ برتر انگلیس", "esp.1": "🇪 لالیگا", "ger.1": "🇩🇪 بوندس‌لیگا", "ita.1": "🇮🇹 سری آ", "fra.1": "🇫🇷 لیگ ۱", "por.1": "🇵🇹 پرتغال", "ksa.1": "🇸🇦 عربستان", "eng.2": "🏴 Championship", "esp.2": "🇪🇸 Segunda"}
+SOCCER = {"eng.1": "🏴 لیگ برتر انگلیس", "esp.1": "🇪🇸 لالیگا", "ger.1": "🇩🇪 بوندس‌لیگا", "ita.1": "🇮🇹 سری آ", "fra.1": "🇫🇷 لیگ ۱", "por.1": "🇵🇹 پرتغال", "ksa.1": "🇸 عربستان", "eng.2": "🏴 Championship", "esp.2": "🇪🇸 Segunda"}
 TENNIS = {"atp": "🎾 ATP", "wta": "🎾 WTA"}
 WD = ["شنبه", "یکشنبه", "دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه"]
 MO = ["فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور", "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"]
+STOP = {"city", "united", "fc", "sc", "ac", "athletic", "real", "club", "sporting", "county", "town", "rovers", "rangers", "wanderers", "albion", "forest", "north", "south", "east", "west", "dynamo", "nacional", "atletico", "inter", "union", "racing", "stars", "red", "white", "black"}
 MIN_EDGE = 0.03
 SOCCER_GAP = 55
 TENNIS_GAP = 30
@@ -42,6 +43,14 @@ def send(text, html=True):
     except Exception as ex:
         print("tg err", ex)
         return False
+
+def same_day(d1, d2):
+    try:
+        a = datetime.fromisoformat(d1.replace("Z", "+00:00"))
+        b = datetime.fromisoformat(d2.replace("Z", "+00:00"))
+        return abs((a - b).total_seconds()) < 30 * 3600
+    except Exception:
+        return True
 
 def soccer_standings(season=None):
     out = {}
@@ -138,15 +147,14 @@ def keys(name, sport):
     n = name.lower().strip()
     parts = n.split()
     ks = [n]
-    if parts:
-        ks.append(parts[0])
-        if len(parts) > 1:
-            ks.append(parts[-1])
+    for p in parts:
+        if p not in STOP and len(p) >= 4:
+            ks.append(p)
     out = []
     for k in ks:
-        if len(k) >= 3 and k not in out:
+        if k not in out:
             out.append(k)
-    return out or [n]
+    return out
 
 def poly_events():
     evs = []
@@ -161,19 +169,21 @@ def poly_events():
             print("poly err", tag, ex)
     return evs
 
-def search_poly(home, away, sport):
+def search_poly(home, away, sport, date):
     kh, ka = keys(home, sport), keys(away, sport)
+    toks = [k for k in (ka + kh) if len(k) >= 5 and " " not in k]
+    q = toks[0] if toks else away
     try:
-        d = httpx.get(f"{POLY}/public-search", params={"q": f"{home} {away}", "limit": 10}, timeout=15).json()
+        d = httpx.get(f"{POLY}/public-search", params={"q": q, "limit": 20}, timeout=15).json()
     except Exception:
         return None, ""
     evs = d.get("events") or (d.get("data") or {}).get("events") or []
     for ev in evs:
         t = (ev.get("title") or "").lower()
-        if any(h in t for h in kh) and any(a in t for a in ka):
+        if any(h in t for h in kh) and any(a in t for a in ka) and same_day(ev.get("startDate") or "", date):
             ev["_tag"] = sport
             return ev, ""
-    return None, json.dumps(d, ensure_ascii=False)[:250]
+    return None, json.dumps(d, ensure_ascii=False)[:200]
 
 def get_markets(ev):
     mks = ev.get("markets") or []
@@ -188,6 +198,7 @@ def get_markets(ev):
 
 def poly_prices(ev, home, away, sport):
     kh, ka = keys(home, sport), keys(away, sport)
+    ph = pa = None
     for mk in get_markets(ev):
         try:
             oc, pr = mk.get("outcomes"), mk.get("outcomePrices")
@@ -197,42 +208,37 @@ def poly_prices(ev, home, away, sport):
                 pr = json.loads(pr)
             if not oc or not pr or len(oc) != len(pr):
                 continue
-            ph = pa = None
+            q = ((mk.get("question") or "") + " " + (mk.get("groupItemTitle") or "")).lower()
             for i, o in enumerate(oc):
                 ol = str(o).lower()
+                if ol in ("yes", "no", "draw"):
+                    continue
                 if any(k in ol for k in kh):
                     ph = float(pr[i])
                 elif any(k in ol for k in ka):
                     pa = float(pr[i])
-            if (ph is None or pa is None) and len(oc) == 2 and str(oc[0]).lower() == "yes":
-                q = ((mk.get("question") or "") + " " + (mk.get("groupItemTitle") or "")).lower()
-                if any(k in q for k in kh):
+            if len(oc) == 2 and str(oc[0]).lower() == "yes":
+                mh = any(k in q for k in kh)
+                ma = any(k in q for k in ka)
+                if mh and not ma and ph is None:
                     ph = float(pr[0])
-                    pa = round(1 - ph, 4)
-                elif any(k in q for k in ka):
+                elif ma and not mh and pa is None:
                     pa = float(pr[0])
-                    ph = round(1 - pa, 4)
-            if ph is None and pa is None and len(oc) == 3:
-                low = [str(o).lower() for o in oc]
-                if "draw" in low:
-                    idx = [i for i in range(3) if low[i] != "draw"]
-                    ph = float(pr[idx[0]])
-                    pa = float(pr[idx[1]])
-            if ph is not None and pa is not None:
-                return ph, pa
         except Exception:
             continue
+        if ph is not None and pa is not None:
+            return ph, pa
     return None, None
 
 def poly_link(ev):
     s = ev.get("slug") or ""
     return f"https://polymarket.com/event/{s}" if s else None
 
-def find_poly(evlist, home, away, sport):
+def find_poly(evlist, home, away, sport, date):
     kh, ka = keys(home, sport), keys(away, sport)
     for ev in evlist:
         t = (ev.get("title") or "").lower()
-        if any(h in t for h in kh) and any(a in t for a in ka):
+        if any(h in t for h in kh) and any(a in t for a in ka) and same_day(ev.get("startDate") or "", date):
             return ev
     return None
 
