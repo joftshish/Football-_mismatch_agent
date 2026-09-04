@@ -3,11 +3,14 @@ import traceback
 from datetime import datetime
 
 def analyze_ev(ev, cur, last, tr):
-    title = ev.get("title") or ""
+    title = (ev.get("title") or "").strip()
     sep = " vs " if " vs " in title else (" v " if " v " in title else None)
     if not sep:
         return None
-    home, away = [x.strip() for x in title.split(sep, 1)]
+    parts = [x.strip() for x in title.split(sep, 1)]
+    if len(parts) != 2 or not parts[0] or not parts[1]:
+        return None
+    home, away = parts
     sport = ev.get("_tag", "soccer")
     ph, pa = C.poly_prices(ev, home, away, sport)
     if ph is None:
@@ -24,7 +27,7 @@ def analyze_ev(ev, cur, last, tr):
         hl = hd.get("played", 0) < 5
         al = ad.get("played", 0) < 5
         hr = hd.get("rank", 17) if not hl else last.get(slug, {}).get(home, {}).get("rank", 17)
-        ar = ad.get("rank", 17) if not al else last.get(slug, {}).get(away, {}).get("rank", 17)
+        ar = hd.get("rank", 17) if not al else last.get(slug, {}).get(away, {}).get("rank", 17)
         hp, ap = C.soccer_power(hr, hd, True), C.soccer_power(ar, ad, False)
         league = C.SOCCER[slug]
         icon = "⚽"
@@ -65,20 +68,12 @@ def main():
         tr = C.tennis_rankings()
         sent = 0
         for e in fresh[:10]:
-            a = analyze_ev(e, cur, last, tr)
-            if a and str(e.get("id")) not in noted and C.notify("⚡", a):
-                sent += 1
-                noted.append(str(e.get("id")))
+            try:
+                a = analyze_ev(e, cur, last, tr)
+                if a and str(e.get("id")) not in noted and C.notify("⚡", a):
+                    sent += 1
+                    noted.append(str(e.get("id")))
+            except Exception as ex:
+                print("ev err:", ex)
         print("sent:", sent)
-    for e in evs:
-        known.append(str(e.get("id")))
-    C.save_state(st)
-    print("fast done")
-
-if __name__ == "__main__":
-    try:
-        main()
-    except Exception:
-        e = traceback.format_exc()
-        print(e)
-        raise
+    for
