@@ -1,6 +1,6 @@
 import Core as C
 import traceback
-from datetime import datetime
+from datetime import datetime, timezone
 
 def analyze_ev(ev, cur, last, tr):
     title = (ev.get("title") or "").strip()
