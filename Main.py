@@ -64,7 +64,7 @@ def main():
                     watch.append({"home": m["home"], "away": m["away"], "sport": m["sport"], "slug": m["slug"], "date": m["date"], "league": m["league"]})
                     wl += 1
     today = now.strftime("%Y-%m-%d")
-    if vb or mm or wl or st.get("last_summary") != today:
+    if True:
         rows.sort(reverse=True)
         top = "\n".join(r[1] for r in rows[:8]) or "—"
         extra = ("\n\n🔬 " + "\n".join(dbg)) if dbg else ""
