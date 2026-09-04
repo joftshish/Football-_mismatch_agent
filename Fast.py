@@ -27,7 +27,7 @@ def analyze_ev(ev, cur, last, tr):
         hl = hd.get("played", 0) < 5
         al = ad.get("played", 0) < 5
         hr = hd.get("rank", 17) if not hl else last.get(slug, {}).get(home, {}).get("rank", 17)
-        ar = hd.get("rank", 17) if not al else last.get(slug, {}).get(away, {}).get("rank", 17)
+        ar = ad.get("rank", 17) if not al else last.get(slug, {}).get(away, {}).get("rank", 17)
         hp, ap = C.soccer_power(hr, hd, True), C.soccer_power(ar, ad, False)
         league = C.SOCCER[slug]
         icon = "⚽"
@@ -76,4 +76,19 @@ def main():
             except Exception as ex:
                 print("ev err:", ex)
         print("sent:", sent)
-    for
+    for e in evs:
+        known.append(str(e.get("id")))
+    C.save_state(st)
+    print("fast done")
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception:
+        e = traceback.format_exc()
+        print(e)
+        try:
+            C.send("❌ خطای Fast:\n" + e[-2000:], html=False)
+        except Exception:
+            pass
+        raise
