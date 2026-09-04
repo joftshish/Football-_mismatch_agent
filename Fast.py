@@ -13,7 +13,6 @@ def analyze_ev(ev, cur, last, tr):
     home, away = parts
     sport = ev.get("_tag", "soccer")
     m = {"home": home, "away": away, "sport": sport, "slug": "", "date": ev.get("startDate") or "", "league": "", "id": str(ev.get("id"))}
-    c = C.compute(m, cur, last, tr) if sport == "tennis" or True else None
     if sport == "soccer":
         slug = None
         for s, t in cur.items():
@@ -58,6 +57,8 @@ def main():
         remaining = []
         for w in watch:
             ev = C.find_poly(evs, w["home"], w["away"], w["sport"])
+            if not ev:
+                ev, _ = C.search_poly(w["home"], w["away"], w["sport"])
             if not ev:
                 remaining.append(w)
                 continue
