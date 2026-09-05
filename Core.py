@@ -234,7 +234,7 @@ def poly_link(ev):
     s = ev.get("slug") or ""
     return f"https://polymarket.com/event/{s}" if s else None
 
-    def find_poly(evlist, home, away, sport, date=""):
+def find_poly(evlist, home, away, sport, date=""):
     kh, ka = keys(home, sport), keys(away, sport)
     for ev in evlist:
         t = (ev.get("title") or "").lower()
