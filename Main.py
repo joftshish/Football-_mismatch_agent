@@ -23,22 +23,29 @@ def main():
         if not ev:
             msg += f"{home}: NOT found\n"
             continue
-        msg += f"\n{home} vs {away}\n→ {ev.get('title','?')[:50]}\n→ start: {str(ev.get('startDate'))[:10]} | closed: {ev.get('closed')}\n"
+        msg += f"\n{home} vs {away}\n"
+        msg += f"title: {ev.get('title','?')[:50]}\n"
+        msg += f"start: {str(ev.get('startDate'))[:10]} | closed: {ev.get('closed')}\n"
         for mk in C.get_markets(ev)[:8]:
             q = ((mk.get("question") or "") + " " + (mk.get("groupItemTitle") or "")).lower()
             oc = mk.get("outcomes")
             pr = mk.get("outcomePrices")
-            mark = "✅" if is_moneyline(q) else "❌"
-            msg += f"  [{mark}] {q[:65]}\n      oc: {str(oc)[:50]} | pr: {str(pr)[:50]}\n"
+            mark = "ML" if is_moneyline(q) else "XX"
+            msg += f"  [{mark}] {q[:65]}\n"
+            msg += f"      oc: {str(oc)[:50]}\n"
+            msg += f"      pr: {str(pr)[:50]}\n"
     msg += "\n== B) لوله تنیس ==\n"
     tf = C.tennis_fixtures()
     msg += f"tennis fixtures: {len(tf)}\n"
     tr = C.tennis_rankings()
-    msg += f"ranks loaded → atp: {len(tr.get('atp', {}))} | wta: {len(tr.get('wta', {}))}\n"
+    na = len(tr.get("atp", {}))
+    nw = len(tr.get("wta", {}))
+    msg += f"ranks loaded -> atp: {na} | wta: {nw}\n"
+    if tf:
         m = tf[0]
         last_name = m["home"].lower().split()[-1]
         msg += f"sample: {m['home']} vs {m['away']} ({m['slug']})\n"
-        msg += f"lookup '{last_name}' → {tr.get(m['slug'], {}).get(last_name)}\n"
+        msg += f"lookup '{last_name}' -> {tr.get(m['slug'], {}).get(last_name)}\n"
     tev = [e for e in pev if e.get("_tag") == "tennis"]
     msg += f"poly tennis events: {len(tev)}\n"
     if tev:
