@@ -34,8 +34,7 @@ def main():
     tf = C.tennis_fixtures()
     msg += f"tennis fixtures: {len(tf)}\n"
     tr = C.tennis_rankings()
-    msg += f"ranks loaded → atp: {len(tr.get('atp', {})) | wta: {len(tr.get('wta', {}))}\n"
-    if tf:
+    msg += f"ranks loaded → atp: {len(tr.get('atp', {}))} | wta: {len(tr.get('wta', {}))}\n"
         m = tf[0]
         last_name = m["home"].lower().split()[-1]
         msg += f"sample: {m['home']} vs {m['away']} ({m['slug']})\n"
