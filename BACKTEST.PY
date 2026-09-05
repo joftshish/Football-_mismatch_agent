@@ -6,8 +6,6 @@ CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 BASE = "https://site.api.espn.com/apis"
 LEAGUES = {"eng.1": "انگلیس", "esp.1": "اسپانیا", "ger.1": "آلمان", "ita.1": "ایتالیا", "fra.1": "فرانسه", "por.1": "پرتغال", "ksa.1": "عربستان"}
 
-DEFAULT_TEAM = {"rank": 17, "played": 10, "wins": 3, "gf": 12, "ga": 20}
-
 def standings(season):
     out = {}
     for slug in LEAGUES:
@@ -19,23 +17,15 @@ def standings(season):
                     name = (e.get("team") or {}).get("displayName", "")
                     st = {s.get("name"): s.get("value", 0) for s in e.get("stats", [])}
                     if name:
-                        t[name] = {"rank": int(st.get("rank", 14)), "played": int(st.get("gamesPlayed", 0)), "wins": int(st.get("wins", 0)), "gf": int(st.get("pointsFor", 0)), "ga": int(st.get("pointsAgainst", 0))}
+                        t[name] = int(st.get("rank", 0))
         except Exception as ex:
             print("st err", slug, ex)
         out[slug] = t
         time.sleep(0.2)
     return out
 
-def power(rank, d, home):
-    base = 100 - int(rank) * 3
-    played = d.get("played", 0)
-    if played > 0:
-        form_bonus = (d.get("wins", 0) / played - 0.4) * 15
-        gd_bonus = max(-10, min(10, ((d.get("gf", 0) - d.get("ga", 0)) / played) * 5))
-    else:
-        form_bonus = 0
-        gd_bonus = 0
-    return max(0, min(100, base + form_bonus + gd_bonus + (8 if home else 0)))
+def power_rank(rank, home):
+    return 100 - int(rank) * 3 + (8 if home else 0)
 
 def day_matches(slug, dstr):
     out = []
@@ -63,11 +53,11 @@ def send(text):
         return False
 
 def main():
-    print("calibration start")
+    print("full-season calibration start")
     ranks = standings(2024)
-    start = datetime(2025, 8, 8)
-    end = datetime(2025, 9, 22)
-    B = [(25, 35, "25-35"), (35, 45, "35-45"), (45, 55, "45-55"), (55, 65, "55-65"), (65, 1000, "65+")]
+    start = datetime(2025, 8, 1)
+    end = datetime(2026, 5, 31)
+    B = [(25, 35, "25-35"), (35, 45, "35-45"), (45, 55, "45-55"), (55, 65, "55-65"), (65, 75, "65-75"), (75, 1000, "75+")]
     stats = {lab: [0, 0] for _, _, lab in B}
     total = 0
     draws = 0
@@ -76,10 +66,12 @@ def main():
         dstr = d.strftime("%Y%m%d")
         for slug in LEAGUES:
             for m in day_matches(slug, dstr):
-                hd = ranks.get(slug, {}).get(m["home"], DEFAULT_TEAM)
-                ad = ranks.get(slug, {}).get(m["away"], DEFAULT_TEAM)
-                hp = power(hd["rank"], hd, True)
-                ap = power(ad["rank"], ad, False)
+                hr = ranks.get(slug, {}).get(m["home"])
+                ar = ranks.get(slug, {}).get(m["away"])
+                if not hr or not ar:
+                    continue
+                hp = power_rank(hr, True)
+                ap = power_rank(ar, False)
                 gap = abs(hp - ap)
                 if gap < 25:
                     continue
@@ -95,14 +87,14 @@ def main():
                         if w == stronger:
                             stats[lab][1] += 1
                         break
-            time.sleep(0.15)
+            time.sleep(0.1)
         d += timedelta(days=1)
     lines = []
     for _, _, lab in B:
         n, c = stats[lab]
         pct = round(c / n * 100) if n else 0
-        lines.append(f"اختلاف {lab}: {n} بازی، برد قوی‌تر {pct}%")
-    report = "📊 کالیبراسیون (۷ لیگ)\n" + "\n".join(lines) + f"\n\nکل: {total} | مساوی: {draws}"
+        lines.append(f"gap {lab}: {n} بازی → برد قوی‌تر {pct}%")
+    report = "📊 کالیبراسیون کل فصل\n(رتبه فصل قبل، ~۲۰۰۰ بازی)\n\n" + "\n".join(lines) + f"\n\nکل: {total} | مساوی: {draws}\n\nاین اعداد واقعی‌ان؛ با این‌ها مدل رو صادق می‌کنیم 🙏"
     send(report)
     print(report)
 
