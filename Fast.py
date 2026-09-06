@@ -2,7 +2,7 @@ import Core as C
 import traceback
 from datetime import datetime, timezone
 
-def analyze_ev(ev, cur, last, tr):
+def analyze_ev(ev, cur, last, tr, min_e):
     title = (ev.get("title") or "").strip()
     sep = " vs " if " vs " in title else (" v " if " v " in title else None)
     if not sep:
@@ -35,7 +35,7 @@ def analyze_ev(ev, cur, last, tr):
     price = ph if c["sh"] else pa
     edge = c["prob"] - price
     kl = C.kelly(c["prob"], price)
-    if edge < C.MIN_EDGE or kl <= 0:
+    if edge < min_e or edge > C.MAX_EDGE or kl <= 0 or not c["solid"]:
         return None
     return {"title": "VALUE BET زودهنگام ⚡", "league": m["league"], "date": m["date"], "home": home, "away": away, "stronger": c["stronger"], "prob": c["prob"], "price": price, "edge": edge, "kelly": kl, "label": "به‌وضوح نابرابر 🟠", "icon": "🎾" if sport == "tennis" else "⚽", "link": C.poly_link(ev), "note": "⚡ بازار تازه ایجاد شد — برتری زمانی فعال شد"}
 
@@ -44,6 +44,11 @@ def main():
     known = st.setdefault("known_poly", [])
     noted = st.setdefault("notified", [])
     watch = st.setdefault("watchlist", [])
+    links = st.setdefault("last_links", [])
+    prefs = st.get("prefs", {})
+    off_l = set(prefs.get("off", []))
+    only_v = prefs.get("only_value", False)
+    min_e = prefs.get("min_edge", C.MIN_EDGE)
     evs = C.poly_events()
     fresh = [e for e in evs if str(e.get("id")) not in known]
     print("poly:", len(evs), "fresh:", len(fresh))
@@ -56,6 +61,8 @@ def main():
         tr = C.tennis_rankings()
         remaining = []
         for w in watch:
+            if w["league"] in off_l:
+                continue
             ev = C.find_poly(evs, w["home"], w["away"], w["sport"])
             if not ev:
                 ev, _ = C.search_poly(w["home"], w["away"], w["sport"])
@@ -72,21 +79,29 @@ def main():
             price = ph if c["sh"] else pa
             edge = c["prob"] - price
             kl = C.kelly(c["prob"], price)
-            is_value = edge >= C.MIN_EDGE and kl > 0
+            is_value = c["solid"] and edge >= min_e and edge <= C.MAX_EDGE and kl > 0
             a = {"title": "بازار باز شد + VALUE BET 💰⚡" if is_value else "بازار Polymarket باز شد ⚡", "league": w["league"], "date": w["date"], "home": w["home"], "away": w["away"], "stronger": c["stronger"], "prob": c["prob"], "price": price, "edge": edge, "kelly": kl if is_value else 0, "label": "به‌وضوح نابرابر 🟠", "icon": "🎾" if w["sport"] == "tennis" else "⚽", "link": C.poly_link(ev), "note": None if is_value else f"❌ لبه کم ({round(edge*100,1)}%) — فقط برای اطلاع"}
+            if only_v and not is_value:
+                known.append(str(ev.get("id")))
+                continue
             if C.notify("⚡", a):
                 sent += 1
                 noted.append(str(ev.get("id")))
+                if a.get("link"):
+                    links.append(f"{w['home']} vs {w['away']}\n{a['link']}")
             known.append(str(ev.get("id")))
         watch[:] = remaining
         for e in fresh[:10]:
             try:
-                a = analyze_ev(e, cur, last, tr)
-                if a and str(e.get("id")) not in noted and C.notify("⚡", a):
+                a = analyze_ev(e, cur, last, tr, min_e)
+                if a and a["league"] not in off_l and str(e.get("id")) not in noted and C.notify("⚡", a):
                     sent += 1
                     noted.append(str(e.get("id")))
+                    if a.get("link"):
+                        links.append(f"{a['home']} vs {a['away']}\n{a['link']}")
             except Exception as ex:
                 print("ev err:", ex)
+    st["last_links"] = links[-10:]
     for e in evs:
         known.append(str(e.get("id")))
     C.save_state(st)
