@@ -1,13 +1,13 @@
 import httpx, json, math, os, unicodedata
 from datetime import datetime, timedelta, timezone
 
-VERSION = "core10"
+VERSION = "core13"
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 ESPN = "https://site.api.espn.com/apis"
 POLY = "https://gamma-api.polymarket.com"
 TZ = timezone(timedelta(hours=3, minutes=30))
-SOCCER = {"eng.1": "🏴 لیگ برتر انگلیس", "esp.1": "🇪🇸 لالیگا", "ger.1": "🇩🇪 بوندس‌لیگا", "ita.1": "🇮 سری آ", "fra.1": "🇫🇷 لیگ ۱", "por.1": "🇵🇹 پرتغال", "ksa.1": "🇸 عربستان", "eng.2": "🏴 Championship", "esp.2": "🇪🇸 Segunda", "usa.1": "🇺🇸 MLS", "bra.1": "🇧🇷 برزیل", "mex.1": "🇲🇽 مکزیک", "ned.1": "🇳🇱 هلند", "tur.1": "🇹🇷 ترکیه", "jpn.1": "🇯🇵 ژاپن", "ger.2": "🇩🇪 بوندس‌لیگا۲", "ita.2": "🇮 سری B", "eng.3": "🏴 League One", "fra.2": "🇫🇷 لیگ ۲", "arg.1": "🇦🇷 آرژانتین"}
+SOCCER = {"eng.1": "🏴 لیگ برتر انگلیس", "esp.1": "🇪🇸 لالیگا", "ger.1": "🇩🇪 بوندس‌لیگا", "ita.1": "🇮🇹 سری آ", "fra.1": "🇫🇷 لیگ ۱", "por.1": "🇵🇹 پرتغال", "ksa.1": "🇸 عربستان", "eng.2": "🏴 Championship", "esp.2": "🇪🇸 Segunda", "usa.1": "🇺🇸 MLS", "bra.1": "🇧🇷 برزیل", "mex.1": "🇲🇽 مکزیک", "ned.1": "🇳 هلند", "tur.1": "🇹🇷 ترکیه", "jpn.1": "🇯🇵 ژاپن", "ger.2": "🇩🇪 بوندس‌لیگا۲", "ita.2": "🇮 سری B", "eng.3": "🏴 League One", "fra.2": "🇫🇷 لیگ ۲", "arg.1": "🇦 آرژانتین"}
 TENNIS = {"atp": "🎾 ATP", "wta": "🎾 WTA"}
 WD = ["شنبه", "یکشنبه", "دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه"]
 MO = ["فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور", "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"]
@@ -162,10 +162,13 @@ def tennis_probe():
         r = httpx.get(f"{ESPN}/site/v2/sports/tennis/atp/scoreboard", timeout=15)
         d = r.json()
         evs = d.get("events", [])
-        if evs:
-            ns = tennis_names(evs[0].get("competitions", [{}])[0].get("competitors", []))
-            return f"events={len(evs)} | names={ns[:2]}"
-        return "events=0"
+        if not evs:
+            return "events=0"
+        for ev in evs[:3]:
+            cs = ev.get("competitions", [{}])[0].get("competitors", [])
+            if cs:
+                return f"comp_keys={list(cs[0].keys())[:8]} | ath_keys={list((cs[0].get('athlete') or {}).keys())[:6]}"
+        return "raw=" + json.dumps(evs[0], ensure_ascii=False)[:250]
     except Exception as ex:
         return f"err: {ex}"
 
@@ -288,6 +291,7 @@ def find_poly(evlist, home, away, sport, date=""):
     return None
 
 def compute(m, cur, last, tr):
+    solid = False
     if m["sport"] == "soccer":
         t = cur.get(m["slug"], {})
         hd, ad = t.get(m["home"], {}), t.get(m["away"], {})
@@ -295,8 +299,16 @@ def compute(m, cur, last, tr):
         a_cur = ad.get("played", 0) >= 5
         if h_cur != a_cur:
             return None
-        hr = hd.get("rank", DEFAULT_RANK) if h_cur else last.get(m["slug"], {}).get(m["home"], {}).get("rank", DEFAULT_RANK)
-        ar = ad.get("rank", DEFAULT_RANK) if a_cur else last.get(m["slug"], {}).get(m["away"], {}).get("rank", DEFAULT_RANK)
+        if h_cur:
+            solid = hd.get("played", 0) >= 8 and ad.get("played", 0) >= 8
+            hr = hd.get("rank", DEFAULT_RANK)
+            ar = ad.get("rank", DEFAULT_RANK)
+        else:
+            lh = last.get(m["slug"], {}).get(m["home"], {})
+            la = last.get(m["slug"], {}).get(m["away"], {})
+            solid = lh.get("played", 0) >= 20 and la.get("played", 0) >= 20
+            hr = lh.get("rank", DEFAULT_RANK)
+            ar = la.get("rank", DEFAULT_RANK)
         hp, ap = soccer_power(hr, hd, True), soccer_power(ar, ad, False)
         low = not (h_cur and a_cur)
     else:
@@ -306,12 +318,13 @@ def compute(m, cur, last, tr):
             return None
         hp, ap = tennis_power(hr), tennis_power(ar)
         low = False
+        solid = True
     gap = abs(hp - ap)
     thr = SOCCER_GAP if m["sport"] == "soccer" else TENNIS_GAP
     if gap < thr:
         return None
     sh = hp > ap
-    return {"gap": gap, "thr": thr, "stronger": m["home"] if sh else m["away"], "sh": sh, "prob": model_prob(gap), "low": low}
+    return {"gap": gap, "thr": thr, "stronger": m["home"] if sh else m["away"], "sh": sh, "prob": model_prob(gap), "low": low, "solid": solid}
 
 def load_state():
     if os.path.exists("state.json"):
@@ -326,6 +339,7 @@ def save_state(s):
     s["notified"] = s.get("notified", [])[-500:]
     s["watch_noted"] = s.get("watch_noted", [])[-300:]
     s["watchlist"] = s.get("watchlist", [])[-100:]
+    s["last_links"] = s.get("last_links", [])[-10:]
     json.dump(s, open("state.json", "w"))
 
 def notify(emoji, a):
@@ -341,7 +355,7 @@ def notify(emoji, a):
     if a.get("note"):
         t += f"\n{a['note']}"
     if a.get("link"):
-        t += f"\n\n🔗 <a href=\"{a['link']}\">باز کردن مستقیم بت در Polymarket</a>"
+        t += f"\n\n📋 لینک بت (کپی کن):\n{a['link']}"
     return send(t)
 
 def notify_watch(m, c):
