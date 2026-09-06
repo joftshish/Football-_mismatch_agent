@@ -1,88 +1,368 @@
-import Core as C
-import traceback
-from datetime import datetime, timezone
+import httpx, json, math, os, unicodedata
+from datetime import datetime, timedelta, timezone
 
-def main():
-    print("=== v20 ===")
-    st = C.load_state()
-    noted = st.setdefault("notified", [])
-    known = st.setdefault("known_poly", [])
-    watch = st.setdefault("watchlist", [])
-    watch_noted = st.setdefault("watch_noted", [])
-    now = datetime.now(timezone.utc)
-    ls = (now.year if now.month >= 7 else now.year - 1) - 1
-    fx = C.soccer_fixtures() + C.tennis_fixtures()
-    nten = sum(1 for m in fx if m["sport"] == "tennis")
-    cur = C.soccer_standings()
-    last = C.soccer_standings(ls)
-    tr = C.tennis_rankings()
-    pev = C.poly_events()
-    vb = mm = wl = skipped = 0
-    rows = []
-    dbg = []
-    for m in fx:
-        c = C.compute(m, cur, last, tr)
-        if not c:
-            continue
-        ev = C.find_poly(pev, m["home"], m["away"], m["sport"], m["date"])
-        src = "list"
-        raw = ""
-        if not ev:
-            ev, raw = C.search_poly(m["home"], m["away"], m["sport"], m["date"])
-            src = "search"
-        ph = pa = None
-        if ev:
-            ph, pa = C.poly_prices(ev, m["home"], m["away"], m["sport"])
-        if ev and ph is not None:
-            price = ph if c["sh"] else pa
-            edge = c["prob"] - price
-            kl = C.kelly(c["prob"], price)
-            is_value = c["solid"] and edge >= C.MIN_EDGE and edge <= C.MAX_EDGE and kl > 0
-            note = None
-            if edge > C.MAX_EDGE:
-                note = "⚠️ لبه مشکوک (زیاد) — با احتیاط!"
-            elif not c["solid"]:
-                note = "⚠️ اوایل فصل/داده کم — فقط اطلاع، بت سنگین ممنوع"
-            elif not is_value and edge < C.MIN_EDGE:
-                note = f"❌ لبه کم ({round(edge*100,1)}%) — ارزش بستن ندارد"
-            lab = "کاملاً نابرابر 🔴" if c["gap"] >= c["thr"] + 10 else "به‌وضوح نابرابر 🟠"
-            a = {"title": "VALUE BET 💰" if is_value else "بازی نابرابر ⚔️", "league": m["league"], "date": m["date"], "home": m["home"], "away": m["away"], "stronger": c["stronger"], "prob": c["prob"], "price": price, "edge": edge, "kelly": kl if is_value else 0, "label": lab, "icon": "🎾" if m["sport"] == "tennis" else "⚽", "link": C.poly_link(ev), "note": note}
-            rows.append((c["gap"], f"{m['home']} - {m['away']} | {round(c['gap'])} | بازار {round(price*100)}% | لبه {round(edge*100,1)}"))
-            eid = str(ev.get("id"))
-            if m["id"] not in noted and eid not in known:
-                if C.notify("💰" if is_value else "⚔️", a):
-                    if is_value:
-                        vb += 1
-                    else:
-                        mm += 1
-                    noted.append(m["id"])
-                    known.append(eid)
-        else:
-            skipped += 1
-            status = f"poly:{src}/قیمت‌نه" if ev else "poly:نه"
-            if raw and len(dbg) < 2:
-                dbg.append(f"{m['home']}-{m['away']}: {raw}")
-            rows.append((c["gap"], f"{m['home']} - {m['away']} | {round(c['gap'])} | {status}"))
-            key = f"{m['home']}|{m['away']}"
-            if key not in watch_noted:
-                if C.notify_watch(m, c):
-                    watch_noted.append(key)
-                    watch.append({"home": m["home"], "away": m["away"], "sport": m["sport"], "slug": m["slug"], "date": m["date"], "league": m["league"]})
-                    wl += 1
-    rows.sort(reverse=True)
-    top = "\n".join(r[1] for r in rows[:8]) or "—"
-    extra = ("\n\n🔬 " + "\n".join(dbg)) if dbg else ""
-    probe = ("\n\n🎾 probe: " + C.tennis_probe()) if nten == 0 else ""
-    C.send(f"📊 گزارش v20 | {getattr(C, 'VERSION', 'CORE-GHADIMI!')}\nبازی‌ها: {len(fx)} (تنیس: {nten}) | بدون بازار: {skipped}\n💰 Value: {vb} | ⚔️ نابرابر: {mm} | 👀 Watch: {wl}\n\nبرترین‌ها:\n{top}{extra}{probe}", html=False)
-    st["last_summary"] = now.strftime("%Y-%m-%d")
-    C.save_state(st)
-    print("done", vb, mm, wl)
+VERSION = "core12"
+TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
+ESPN = "https://site.api.espn.com/apis"
+POLY = "https://gamma-api.polymarket.com"
+TZ = timezone(timedelta(hours=3, minutes=30))
+SOCCER = {"eng.1": "🏴 لیگ برتر انگلیس", "esp.1": "🇪🇸 لالیگا", "ger.1": "🇩🇪 بوندس‌لیگا", "ita.1": "🇮 سری آ", "fra.1": "🇫🇷 لیگ ۱", "por.1": "🇵🇹 پرتغال", "ksa.1": "🇸 عربستان", "eng.2": "🏴 Championship", "esp.2": "🇪 Segunda", "usa.1": "🇺 MLS", "bra.1": "🇧🇷 برزیل", "mex.1": "🇲 مکزیک", "ned.1": "🇳 هلند", "tur.1": "🇹 ترکیه", "jpn.1": "🇯🇵 ژاپن", "ger.2": "🇩🇪 بوندس‌لیگا۲", "ita.2": "🇮 سری B", "eng.3": "🏴 League One", "fra.2": "🇫 لیگ ۲", "arg.1": "🇦 آرژانتین"}
+TENNIS = {"atp": "🎾 ATP", "wta": "🎾 WTA"}
+WD = ["شنبه", "یکشنبه", "دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه"]
+MO = ["فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور", "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"]
+STOP = {"city", "united", "fc", "sc", "ac", "athletic", "real", "club", "sporting", "county", "town", "rovers", "rangers", "wanderers", "albion", "forest", "north", "south", "east", "west", "dynamo", "nacional", "atletico", "inter", "union", "racing", "stars", "red", "white", "black"}
+MIN_EDGE = 0.03
+MAX_EDGE = 0.20
+SOCCER_GAP = 45
+TENNIS_GAP = 30
+DEFAULT_RANK = 17
 
-if __name__ == "__main__":
+def norm(s):
+    return "".join(c for c in unicodedata.normalize("NFKD", (s or "").lower()) if not unicodedata.combining(c))
+
+def jalali(dt):
     try:
-        main()
+        import jdatetime
+        j = jdatetime.datetime.fromgregorian(datetime=dt)
+        return f"{WD[j.weekday()]} {j.day} {MO[j.month-1]} {j.year}", j.strftime("%H:%M")
     except Exception:
-        e = traceback.format_exc()
-        print(e)
-        C.send("❌ خطا:\n" + e[-2000:], html=False)
-        raise
+        return dt.strftime("%Y-%m-%d"), dt.strftime("%H:%M")
+
+def model_prob(gap):
+    if gap >= 55:
+        return 0.92
+    if gap >= 45:
+        return 0.90
+    if gap >= 35:
+        return 0.84
+    if gap >= 25:
+        return 0.75
+    return 0.65
+
+def kelly(p, price):
+    if p <= price:
+        return 0
+    odds = 1 / price
+    return max(0, min(((p * odds - 1) / (odds - 1)) * 0.015, 0.02))
+
+def send(text, html=True):
+    try:
+        pl = {"chat_id": CHAT_ID, "text": text}
+        if html:
+            pl["parse_mode"] = "HTML"
+        r = httpx.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json=pl, timeout=10)
+        return r.status_code == 200
+    except Exception as ex:
+        print("tg err", ex)
+        return False
+
+def is_closed(x):
+    return x.get("closed") in (True, "true")
+
+def soccer_standings(season=None):
+    out = {}
+    for slug in SOCCER:
+        t = {}
+        tries = [{"season": season, "seasontype": 1}, {"season": season}] if season else [{}]
+        for p in tries:
+            try:
+                r = httpx.get(f"{ESPN}/v2/sports/soccer/{slug}/standings", params=p, timeout=15).json()
+                for ch in r.get("children", []):
+                    for e in ch.get("standings", {}).get("entries", []):
+                        name = (e.get("team") or {}).get("displayName", "")
+                        st = {s.get("name"): s.get("value", 0) for s in e.get("stats", [])}
+                        if name:
+                            t[name] = {"rank": int(st.get("rank", DEFAULT_RANK)), "played": int(st.get("gamesPlayed", 0)), "wins": int(st.get("wins", 0)), "gf": int(st.get("pointsFor", 0)), "ga": int(st.get("pointsAgainst", 0))}
+                if t:
+                    break
+            except Exception as ex:
+                print("st err", slug, ex)
+        out[slug] = t
+    return out
+
+def soccer_fixtures(days=5):
+    out = []
+    for i in range(days):
+        d = (datetime.now(timezone.utc) + timedelta(days=i)).strftime("%Y%m%d")
+        for slug, lname in SOCCER.items():
+            try:
+                r = httpx.get(f"{ESPN}/site/v2/sports/soccer/{slug}/scoreboard", params={"dates": d}, timeout=15).json()
+                for ev in r.get("events", []):
+                    cs = ev.get("competitions", [{}])[0].get("competitors", [])
+                    h = next((c for c in cs if c.get("homeAway") == "home"), None)
+                    a = next((c for c in cs if c.get("homeAway") == "away"), None)
+                    if h and a:
+                        hn = (h.get("team") or {}).get("displayName", "")
+                        an = (a.get("team") or {}).get("displayName", "")
+                        if hn and an:
+                            out.append({"id": str(ev.get("id")), "sport": "soccer", "league": lname, "slug": slug, "date": ev.get("date", ""), "home": hn, "away": an})
+            except Exception as ex:
+                print("fx err", slug, d, ex)
+    return out
+
+def tennis_rankings():
+    out = {"atp": {}, "wta": {}}
+    urls = {"atp": ["https://raw.githubusercontent.com/JeffSackmann/tennis_atp/master/atp_rankings_current.csv", "https://raw.githubusercontent.com/Kadantte/tennis_atp/master/atp_rankings_current.csv", "https://raw.githubusercontent.com/beta2k/tennis_atp/master/atp_rankings_current.csv"], "wta": ["https://raw.githubusercontent.com/JeffSackmann/tennis_wta/master/wta_rankings_current.csv", "https://raw.githubusercontent.com/Kadantte/tennis_wta/master/wta_rankings_current.csv", "https://raw.githubusercontent.com/beta2k/tennis_wta/master/wta_rankings_current.csv"]}
+    for tour, lst in urls.items():
+        for url in lst:
+            try:
+                r = httpx.get(url, timeout=15)
+                if r.status_code != 200:
+                    continue
+                tmp = {}
+                for ln in r.text.strip().splitlines()[1:]:
+                    p = ln.split(",")
+                    if len(p) >= 3 and p[1].strip().isdigit():
+                        tmp[p[2].strip().split()[0].lower()] = int(p[1])
+                if tmp:
+                    out[tour] = tmp
+                    break
+            except Exception:
+                continue
+    return out
+
+def tennis_names(cs):
+    ns = []
+    for c in cs:
+        ath = c.get("athlete") or c.get("team") or {}
+        name = ath.get("displayName") or ath.get("fullName") or ath.get("shortDisplayName") or ""
+        if name:
+            ns.append(name)
+    return ns
+
+def tennis_fixtures(days=5):
+    out = []
+    for tour, lname in TENNIS.items():
+        got = []
+        for i in range(days):
+            d = (datetime.now(timezone.utc) + timedelta(days=i)).strftime("%Y%m%d")
+            try:
+                r = httpx.get(f"{ESPN}/site/v2/sports/tennis/{tour}/scoreboard", params={"dates": d}, timeout=15).json()
+                for ev in r.get("events", []):
+                    ns = tennis_names(ev.get("competitions", [{}])[0].get("competitors", []))
+                    if len(ns) >= 2:
+                        got.append({"id": str(ev.get("id")), "sport": "tennis", "league": lname, "slug": tour, "date": ev.get("date", ""), "home": ns[0], "away": ns[1]})
+            except Exception as ex:
+                print("tfx err", tour, d, ex)
+        if not got:
+            try:
+                r = httpx.get(f"{ESPN}/site/v2/sports/tennis/{tour}/scoreboard", timeout=15).json()
+                for ev in r.get("events", []):
+                    ns = tennis_names(ev.get("competitions", [{}])[0].get("competitors", []))
+                    if len(ns) >= 2:
+                        got.append({"id": str(ev.get("id")), "sport": "tennis", "league": lname, "slug": tour, "date": ev.get("date", ""), "home": ns[0], "away": ns[1]})
+            except Exception as ex:
+                print("tfx2 err", tour, ex)
+        out += got
+    return out
+
+def tennis_probe():
+    try:
+        r = httpx.get(f"{ESPN}/site/v2/sports/tennis/atp/scoreboard", timeout=15)
+        d = r.json()
+        evs = d.get("events", [])
+        if not evs:
+            return "events=0"
+        for ev in evs[:3]:
+            cs = ev.get("competitions", [{}])[0].get("competitors", [])
+            if cs:
+                return f"comp_keys={list(cs[0].keys())[:8]} | ath_keys={list((cs[0].get('athlete') or {}).keys())[:6]}"
+        return "raw=" + json.dumps(evs[0], ensure_ascii=False)[:250]
+    except Exception as ex:
+        return f"err: {ex}"
+
+def soccer_power(rank, d, home):
+    base = 100 - int(rank) * 3
+    played = d.get("played", 0)
+    if played > 0:
+        fb = (d.get("wins", 0) / played - 0.4) * 15
+        gb = max(-10, min(10, ((d.get("gf", 0) - d.get("ga", 0)) / played) * 5))
+    else:
+        fb = gb = 0
+    return max(0, min(100, base + fb + gb + (8 if home else 0)))
+
+def tennis_power(rank):
+    return 100 - 30 * math.log10(max(int(rank), 1) + 1)
+
+def keys(name, sport):
+    n = norm(name).strip()
+    parts = n.split()
+    ks = [n]
+    for p in parts:
+        if p not in STOP and len(p) >= 4:
+            ks.append(p)
+    out = []
+    for k in ks:
+        if k not in out:
+            out.append(k)
+    return out
+
+def poly_events():
+    evs = []
+    for tag in ["soccer", "tennis"]:
+        try:
+            d = httpx.get(f"{POLY}/events", params={"closed": "false", "tag_slug": tag, "limit": 200}, timeout=15).json()
+            if isinstance(d, list):
+                for e in d:
+                    e["_tag"] = tag
+                evs += d
+        except Exception as ex:
+            print("poly err", tag, ex)
+    return evs
+
+def search_poly(home, away, sport, date=""):
+    kh, ka = keys(home, sport), keys(away, sport)
+    toks = [k for k in (ka + kh) if len(k) >= 5 and " " not in k]
+    q = toks[0] if toks else away
+    try:
+        d = httpx.get(f"{POLY}/public-search", params={"q": q, "limit": 20}, timeout=15).json()
+    except Exception:
+        return None, ""
+    evs = d.get("events") or (d.get("data") or {}).get("events") or []
+    for ev in evs:
+        if is_closed(ev):
+            continue
+        t = norm(ev.get("title") or "")
+        if any(h in t for h in kh) and any(a in t for a in ka):
+            ev["_tag"] = sport
+            return ev, ""
+    return None, json.dumps(d, ensure_ascii=False)[:200]
+
+def get_markets(ev):
+    mks = ev.get("markets") or []
+    if not mks:
+        try:
+            d = httpx.get(f"{POLY}/markets", params={"event_id": ev.get("id")}, timeout=15).json()
+            if isinstance(d, list):
+                mks = d
+        except Exception:
+            mks = []
+    return [m for m in mks if not is_closed(m)]
+
+def poly_prices(ev, home, away, sport):
+    kh, ka = keys(home, sport), keys(away, sport)
+    ph = pa = None
+    for mk in get_markets(ev):
+        try:
+            oc, pr = mk.get("outcomes"), mk.get("outcomePrices")
+            if isinstance(oc, str):
+                oc = json.loads(oc)
+            if isinstance(pr, str):
+                pr = json.loads(pr)
+            if not oc or not pr or len(oc) != len(pr):
+                continue
+            if set(str(x) for x in pr) <= {"0", "1"}:
+                continue
+            q = norm((mk.get("question") or "") + " " + (mk.get("groupItemTitle") or ""))
+            for i, o in enumerate(oc):
+                ol = norm(o)
+                if ol in ("yes", "no", "draw"):
+                    continue
+                if any(k in ol for k in kh):
+                    ph = float(pr[i])
+                elif any(k in ol for k in ka):
+                    pa = float(pr[i])
+            if len(oc) == 2 and str(oc[0]).lower() == "yes":
+                mh = any(k in q for k in kh)
+                ma = any(k in q for k in ka)
+                if mh and not ma and ph is None:
+                    ph = float(pr[0])
+                elif ma and not mh and pa is None:
+                    pa = float(pr[0])
+        except Exception:
+            continue
+        if ph is not None and pa is not None:
+            return ph, pa
+    return None, None
+
+def poly_link(ev):
+    s = ev.get("slug") or ""
+    return f"https://polymarket.com/event/{s}" if s else None
+
+def find_poly(evlist, home, away, sport, date=""):
+    kh, ka = keys(home, sport), keys(away, sport)
+    for ev in evlist:
+        if is_closed(ev):
+            continue
+        t = norm(ev.get("title") or "")
+        if any(h in t for h in kh) and any(a in t for a in ka):
+            return ev
+    return None
+
+def compute(m, cur, last, tr):
+    solid = False
+    if m["sport"] == "soccer":
+        t = cur.get(m["slug"], {})
+        hd, ad = t.get(m["home"], {}), t.get(m["away"], {})
+        h_cur = hd.get("played", 0) >= 5
+        a_cur = ad.get("played", 0) >= 5
+        if h_cur != a_cur:
+            return None
+        if h_cur:
+            solid = hd.get("played", 0) >= 8 and ad.get("played", 0) >= 8
+            hr = hd.get("rank", DEFAULT_RANK)
+            ar = ad.get("rank", DEFAULT_RANK)
+        else:
+            lh = last.get(m["slug"], {}).get(m["home"], {})
+            la = last.get(m["slug"], {}).get(m["away"], {})
+            solid = lh.get("played", 0) >= 20 and la.get("played", 0) >= 20
+            hr = lh.get("rank", DEFAULT_RANK)
+            ar = la.get("rank", DEFAULT_RANK)
+        hp, ap = soccer_power(hr, hd, True), soccer_power(ar, ad, False)
+        low = not (h_cur and a_cur)
+    else:
+        hr = tr.get(m["slug"], {}).get(m["home"].lower().split()[-1])
+        ar = tr.get(m["slug"], {}).get(m["away"].lower().split()[-1])
+        if not hr or not ar:
+            return None
+        hp, ap = tennis_power(hr), tennis_power(ar)
+        low = False
+        solid = True
+    gap = abs(hp - ap)
+    thr = SOCCER_GAP if m["sport"] == "soccer" else TENNIS_GAP
+    if gap < thr:
+        return None
+    sh = hp > ap
+    return {"gap": gap, "thr": thr, "stronger": m["home"] if sh else m["away"], "sh": sh, "prob": model_prob(gap), "low": low, "solid": solid}
+
+def load_state():
+    if os.path.exists("state.json"):
+        try:
+            return json.load(open("state.json"))
+        except Exception:
+            pass
+    return {}
+
+def save_state(s):
+    s["known_poly"] = s.get("known_poly", [])[-500:]
+    s["notified"] = s.get("notified", [])[-500:]
+    s["watch_noted"] = s.get("watch_noted", [])[-300:]
+    s["watchlist"] = s.get("watchlist", [])[-100:]
+    json.dump(s, open("state.json", "w"))
+
+def notify(emoji, a):
+    try:
+        dt = datetime.fromisoformat(a["date"].replace("Z", "+00:00")).astimezone(TZ)
+        jd, tm = jalali(dt)
+    except Exception:
+        jd, tm = a["date"], ""
+    t = f"{emoji} <b>{a['title']}</b>\n\n🏆 {a['league']}\n📅 {jd} — ساعت {tm}\n\n{a['icon']} <b>{a['home']}</b> vs <b>{a['away']}</b>\n\n📊 مدل ما: {round(a['prob']*100)}% برد {a['stronger']}\n💰 بازار Polymarket: {round(a['price']*100)}%\n📈 لبه: {round(a['edge']*100,1)}%"
+    if a.get("kelly"):
+        t += f"\n💵 پیشنهاد Kelly: {round(a['kelly']*100,1)}% سرمایه"
+    t += f"\n📋 {a['label']}"
+    if a.get("note"):
+        t += f"\n{a['note']}"
+    if a.get("link"):
+        t += f"\n\n📋 لینک بت (کپی کن):\n{a['link']}"
+    return send(t)
+
+def notify_watch(m, c):
+    try:
+        dt = datetime.fromisoformat(m["date"].replace("Z", "+00:00")).astimezone(TZ)
+        jd, tm = jalali(dt)
+    except Exception:
+        jd, tm = m["date"], ""
+    icon = "🎾" if m["sport"] == "tennis" else "⚽"
+    t = f"👀 <b>بازی نابرابر — منتظر بازار Polymarket</b>\n\n🏆 {m['league']}\n📅 {jd} — ساعت {tm}\n\n{icon} <b>{m['home']}</b> vs <b>{m['away']}</b>\n\n📊 مدل: {round(c['prob']*100)}% برد {c['stronger']}\n💰 بازار: هنوز باز نشده\n\n⏰ Fast Scan هر 5 دقیقه چک می‌کنه؛ به محض باز شدن، نوتیف ⚡ با لینک مستقیم می‌گیری"
+    return send(t)
