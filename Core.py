@@ -6,13 +6,13 @@ CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 ESPN = "https://site.api.espn.com/apis"
 POLY = "https://gamma-api.polymarket.com"
 TZ = timezone(timedelta(hours=3, minutes=30))
-SOCCER = {"eng.1": "🏴 لیگ برتر انگلیس", "esp.1": "🇪🇸 لالیگا", "ger.1": "🇩🇪 بوندس‌لیگا", "ita.1": "🇮🇹 سری آ", "fra.1": "🇫🇷 لیگ ۱", "por.1": "🇵🇹 پرتغال", "ksa.1": "🇸 عربستان", "eng.2": "🏴 Championship", "esp.2": "🇪🇸 Segunda"}
+SOCCER = {"eng.1": "🏴 لیگ برتر انگلیس", "esp.1": "🇪🇸 لالیگا", "ger.1": "🇩🇪 بوندس‌لیگا", "ita.1": "🇮🇹 سری آ", "fra.1": "🇫 لیگ ۱", "por.1": "🇵🇹 پرتغال", "ksa.1": "🇸 عربستان", "eng.2": "🏴 Championship", "esp.2": "🇪🇸 Segunda"}
 TENNIS = {"atp": "🎾 ATP", "wta": "🎾 WTA"}
 WD = ["شنبه", "یکشنبه", "دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه"]
 MO = ["فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور", "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"]
 STOP = {"city", "united", "fc", "sc", "ac", "athletic", "real", "club", "sporting", "county", "town", "rovers", "rangers", "wanderers", "albion", "forest", "north", "south", "east", "west", "dynamo", "nacional", "atletico", "inter", "union", "racing", "stars", "red", "white", "black"}
 MIN_EDGE = 0.03
-SOCCER_GAP = 55
+SOCCER_GAP = 45
 TENNIS_GAP = 30
 DEFAULT_RANK = 17
 
@@ -25,7 +25,15 @@ def jalali(dt):
         return dt.strftime("%Y-%m-%d"), dt.strftime("%H:%M")
 
 def model_prob(gap):
-    return min(0.92, 0.5 + gap * 0.006)
+    if gap >= 55:
+        return 0.92
+    if gap >= 45:
+        return 0.90
+    if gap >= 35:
+        return 0.84
+    if gap >= 25:
+        return 0.75
+    return 0.65
 
 def kelly(p, price):
     if p <= price:
@@ -51,6 +59,9 @@ def same_day(d1, d2):
         return abs((a - b).total_seconds()) < 30 * 3600
     except Exception:
         return True
+
+def is_closed(x):
+    return x.get("closed") in (True, "true")
 
 def soccer_standings(season=None):
     out = {}
@@ -179,6 +190,8 @@ def search_poly(home, away, sport, date=""):
         return None, ""
     evs = d.get("events") or (d.get("data") or {}).get("events") or []
     for ev in evs:
+        if is_closed(ev):
+            continue
         t = (ev.get("title") or "").lower()
         if any(h in t for h in kh) and any(a in t for a in ka) and same_day(ev.get("startDate") or "", date):
             ev["_tag"] = sport
@@ -194,7 +207,7 @@ def get_markets(ev):
                 mks = d
         except Exception:
             mks = []
-    return mks
+    return [m for m in mks if not is_closed(m)]
 
 def poly_prices(ev, home, away, sport):
     kh, ka = keys(home, sport), keys(away, sport)
@@ -207,6 +220,8 @@ def poly_prices(ev, home, away, sport):
             if isinstance(pr, str):
                 pr = json.loads(pr)
             if not oc or not pr or len(oc) != len(pr):
+                continue
+            if set(str(x) for x in pr) <= {"0", "1"}:
                 continue
             q = ((mk.get("question") or "") + " " + (mk.get("groupItemTitle") or "")).lower()
             for i, o in enumerate(oc):
@@ -237,6 +252,8 @@ def poly_link(ev):
 def find_poly(evlist, home, away, sport, date=""):
     kh, ka = keys(home, sport), keys(away, sport)
     for ev in evlist:
+        if is_closed(ev):
+            continue
         t = (ev.get("title") or "").lower()
         if any(h in t for h in kh) and any(a in t for a in ka) and same_day(ev.get("startDate") or "", date):
             return ev
@@ -246,12 +263,14 @@ def compute(m, cur, last, tr):
     if m["sport"] == "soccer":
         t = cur.get(m["slug"], {})
         hd, ad = t.get(m["home"], {}), t.get(m["away"], {})
-        hl = hd.get("played", 0) < 5
-        al = ad.get("played", 0) < 5
-        hr = hd.get("rank", DEFAULT_RANK) if not hl else last.get(m["slug"], {}).get(m["home"], {}).get("rank", DEFAULT_RANK)
-        ar = ad.get("rank", DEFAULT_RANK) if not al else last.get(m["slug"], {}).get(m["away"], {}).get("rank", DEFAULT_RANK)
+        h_cur = hd.get("played", 0) >= 5
+        a_cur = ad.get("played", 0) >= 5
+        if h_cur != a_cur:
+            return None
+        hr = hd.get("rank", DEFAULT_RANK) if h_cur else last.get(m["slug"], {}).get(m["home"], {}).get("rank", DEFAULT_RANK)
+        ar = ad.get("rank", DEFAULT_RANK) if a_cur else last.get(m["slug"], {}).get(m["away"], {}).get("rank", DEFAULT_RANK)
         hp, ap = soccer_power(hr, hd, True), soccer_power(ar, ad, False)
-        low = hl or al
+        low = not (h_cur and a_cur)
     else:
         hr = tr.get(m["slug"], {}).get(m["home"].lower().split()[-1])
         ar = tr.get(m["slug"], {}).get(m["away"].lower().split()[-1])
