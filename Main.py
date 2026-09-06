@@ -3,7 +3,7 @@ import traceback
 from datetime import datetime, timezone
 
 def main():
-    print("=== v16 ===")
+    print("=== v17 ===")
     st = C.load_state()
     noted = st.setdefault("notified", [])
     known = st.setdefault("known_poly", [])
@@ -69,7 +69,8 @@ def main():
     rows.sort(reverse=True)
     top = "\n".join(r[1] for r in rows[:8]) or "—"
     extra = ("\n\n🔬 " + "\n".join(dbg)) if dbg else ""
-    C.send(f"📊 گزارش v16 | {getattr(C, 'VERSION', 'CORE-GHADIMI!')}\nبازی‌ها: {len(fx)} (تنیس: {nten}) | بدون بازار: {skipped}\n💰 Value: {vb} | ⚔️ نابرابر: {mm} | 👀 Watch: {wl}\n\nبرترین‌ها:\n{top}{extra}", html=False)
+    probe = ("\n\n🎾 probe: " + C.tennis_probe()) if nten == 0 else ""
+    C.send(f"📊 گزارش v17 | {getattr(C, 'VERSION', 'CORE-GHADIMI!')}\nبازی‌ها: {len(fx)} (تنیس: {nten}) | بدون بازار: {skipped}\n💰 Value: {vb} | ⚔️ نابرابر: {mm} | 👀 Watch: {wl}\n\nبرترین‌ها:\n{top}{extra}{probe}", html=False)
     st["last_summary"] = now.strftime("%Y-%m-%d")
     C.save_state(st)
     print("done", vb, mm, wl)
