@@ -1,18 +1,19 @@
 import httpx, json, math, os, unicodedata
 from datetime import datetime, timedelta, timezone
 
-VERSION = "core8"
+VERSION = "core10"
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 ESPN = "https://site.api.espn.com/apis"
 POLY = "https://gamma-api.polymarket.com"
 TZ = timezone(timedelta(hours=3, minutes=30))
-SOCCER = {"eng.1": "🏴 لیگ برتر انگلیس", "esp.1": "🇪 لالیگا", "ger.1": "🇩🇪 بوندس‌لیگا", "ita.1": "🇮🇹 سری آ", "fra.1": "🇫🇷 لیگ ۱", "por.1": "🇵🇹 پرتغال", "ksa.1": "🇸 عربستان", "eng.2": "🏴 Championship", "esp.2": "🇪🇸 Segunda"}
+SOCCER = {"eng.1": "🏴 لیگ برتر انگلیس", "esp.1": "🇪🇸 لالیگا", "ger.1": "🇩🇪 بوندس‌لیگا", "ita.1": "🇮 سری آ", "fra.1": "🇫🇷 لیگ ۱", "por.1": "🇵🇹 پرتغال", "ksa.1": "🇸 عربستان", "eng.2": "🏴 Championship", "esp.2": "🇪🇸 Segunda", "usa.1": "🇺🇸 MLS", "bra.1": "🇧🇷 برزیل", "mex.1": "🇲🇽 مکزیک", "ned.1": "🇳🇱 هلند", "tur.1": "🇹🇷 ترکیه", "jpn.1": "🇯🇵 ژاپن", "ger.2": "🇩🇪 بوندس‌لیگا۲", "ita.2": "🇮 سری B", "eng.3": "🏴 League One", "fra.2": "🇫🇷 لیگ ۲", "arg.1": "🇦🇷 آرژانتین"}
 TENNIS = {"atp": "🎾 ATP", "wta": "🎾 WTA"}
 WD = ["شنبه", "یکشنبه", "دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه"]
 MO = ["فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور", "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"]
 STOP = {"city", "united", "fc", "sc", "ac", "athletic", "real", "club", "sporting", "county", "town", "rovers", "rangers", "wanderers", "albion", "forest", "north", "south", "east", "west", "dynamo", "nacional", "atletico", "inter", "union", "racing", "stars", "red", "white", "black"}
 MIN_EDGE = 0.03
+MAX_EDGE = 0.20
 SOCCER_GAP = 45
 TENNIS_GAP = 30
 DEFAULT_RANK = 17
@@ -121,6 +122,15 @@ def tennis_rankings():
                 continue
     return out
 
+def tennis_names(cs):
+    ns = []
+    for c in cs:
+        ath = c.get("athlete") or c.get("team") or {}
+        name = ath.get("displayName") or ath.get("fullName") or ath.get("shortDisplayName") or ""
+        if name:
+            ns.append(name)
+    return ns
+
 def tennis_fixtures(days=5):
     out = []
     for tour, lname in TENNIS.items():
@@ -130,9 +140,8 @@ def tennis_fixtures(days=5):
             try:
                 r = httpx.get(f"{ESPN}/site/v2/sports/tennis/{tour}/scoreboard", params={"dates": d}, timeout=15).json()
                 for ev in r.get("events", []):
-                    cs = ev.get("competitions", [{}])[0].get("competitors", [])
-                    ns = [((c.get("athlete") or c.get("team") or {}).get("displayName")) or "" for c in cs]
-                    if len(ns) == 2 and ns[0] and ns[1]:
+                    ns = tennis_names(ev.get("competitions", [{}])[0].get("competitors", []))
+                    if len(ns) >= 2:
                         got.append({"id": str(ev.get("id")), "sport": "tennis", "league": lname, "slug": tour, "date": ev.get("date", ""), "home": ns[0], "away": ns[1]})
             except Exception as ex:
                 print("tfx err", tour, d, ex)
@@ -140,9 +149,8 @@ def tennis_fixtures(days=5):
             try:
                 r = httpx.get(f"{ESPN}/site/v2/sports/tennis/{tour}/scoreboard", timeout=15).json()
                 for ev in r.get("events", []):
-                    cs = ev.get("competitions", [{}])[0].get("competitors", [])
-                    ns = [((c.get("athlete") or c.get("team") or {}).get("displayName")) or "" for c in cs]
-                    if len(ns) == 2 and ns[0] and ns[1]:
+                    ns = tennis_names(ev.get("competitions", [{}])[0].get("competitors", []))
+                    if len(ns) >= 2:
                         got.append({"id": str(ev.get("id")), "sport": "tennis", "league": lname, "slug": tour, "date": ev.get("date", ""), "home": ns[0], "away": ns[1]})
             except Exception as ex:
                 print("tfx2 err", tour, ex)
@@ -153,7 +161,11 @@ def tennis_probe():
     try:
         r = httpx.get(f"{ESPN}/site/v2/sports/tennis/atp/scoreboard", timeout=15)
         d = r.json()
-        return f"status={r.status_code} | keys={list(d.keys())[:6]} | events={len(d.get('events', []))}"
+        evs = d.get("events", [])
+        if evs:
+            ns = tennis_names(evs[0].get("competitions", [{}])[0].get("competitors", []))
+            return f"events={len(evs)} | names={ns[:2]}"
+        return "events=0"
     except Exception as ex:
         return f"err: {ex}"
 
