@@ -3,7 +3,7 @@ import traceback
 from datetime import datetime, timezone
 
 def main():
-    print("=== v19 ===")
+    print("=== v20 ===")
     st = C.load_state()
     noted = st.setdefault("notified", [])
     known = st.setdefault("known_poly", [])
@@ -37,16 +37,16 @@ def main():
             price = ph if c["sh"] else pa
             edge = c["prob"] - price
             kl = C.kelly(c["prob"], price)
-            is_value = edge >= C.MIN_EDGE and edge <= C.MAX_EDGE and kl > 0
-            sanity = ""
+            is_value = c["solid"] and edge >= C.MIN_EDGE and edge <= C.MAX_EDGE and kl > 0
+            note = None
             if edge > C.MAX_EDGE:
-                sanity = "⚠️ لبه مشکوک (زیاد) — با احتیاط!"
+                note = "⚠️ لبه مشکوک (زیاد) — با احتیاط!"
+            elif not c["solid"]:
+                note = "⚠️ اوایل فصل/داده کم — فقط اطلاع، بت سنگین ممنوع"
+            elif not is_value and edge < C.MIN_EDGE:
+                note = f"❌ لبه کم ({round(edge*100,1)}%) — ارزش بستن ندارد"
             lab = "کاملاً نابرابر 🔴" if c["gap"] >= c["thr"] + 10 else "به‌وضوح نابرابر 🟠"
-            a = {"title": "VALUE BET 💰" if is_value else "بازی نابرابر ⚔️", "league": m["league"], "date": m["date"], "home": m["home"], "away": m["away"], "stronger": c["stronger"], "prob": c["prob"], "price": price, "edge": edge, "kelly": kl if is_value else 0, "label": lab, "icon": "🎾" if m["sport"] == "tennis" else "⚽", "link": C.poly_link(ev), "note": sanity or None}
-            if c["low"]:
-                a["note"] = (a["note"] or "") + "\n⚠️ داده فصل جاری کم است"
-            if not is_value and not sanity:
-                a["note"] = (a["note"] or "") + f"\n❌ لبه کم ({round(edge*100,1)}%) — ارزش بستن ندارد"
+            a = {"title": "VALUE BET 💰" if is_value else "بازی نابرابر ⚔️", "league": m["league"], "date": m["date"], "home": m["home"], "away": m["away"], "stronger": c["stronger"], "prob": c["prob"], "price": price, "edge": edge, "kelly": kl if is_value else 0, "label": lab, "icon": "🎾" if m["sport"] == "tennis" else "⚽", "link": C.poly_link(ev), "note": note}
             rows.append((c["gap"], f"{m['home']} - {m['away']} | {round(c['gap'])} | بازار {round(price*100)}% | لبه {round(edge*100,1)}"))
             eid = str(ev.get("id"))
             if m["id"] not in noted and eid not in known:
@@ -73,7 +73,7 @@ def main():
     top = "\n".join(r[1] for r in rows[:8]) or "—"
     extra = ("\n\n🔬 " + "\n".join(dbg)) if dbg else ""
     probe = ("\n\n🎾 probe: " + C.tennis_probe()) if nten == 0 else ""
-    C.send(f"📊 گزارش v19 | {getattr(C, 'VERSION', 'CORE-GHADIMI!')}\nبازی‌ها: {len(fx)} (تنیس: {nten}) | بدون بازار: {skipped}\n💰 Value: {vb} | ⚔️ نابرابر: {mm} | 👀 Watch: {wl}\n\nبرترین‌ها:\n{top}{extra}{probe}", html=False)
+    C.send(f"📊 گزارش v20 | {getattr(C, 'VERSION', 'CORE-GHADIMI!')}\nبازی‌ها: {len(fx)} (تنیس: {nten}) | بدون بازار: {skipped}\n💰 Value: {vb} | ⚔️ نابرابر: {mm} | 👀 Watch: {wl}\n\nبرترین‌ها:\n{top}{extra}{probe}", html=False)
     st["last_summary"] = now.strftime("%Y-%m-%d")
     C.save_state(st)
     print("done", vb, mm, wl)
