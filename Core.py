@@ -1,13 +1,13 @@
 import httpx, json, math, os, unicodedata
 from datetime import datetime, timedelta, timezone
 
-VERSION = "core7"
+VERSION = "core8"
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 ESPN = "https://site.api.espn.com/apis"
 POLY = "https://gamma-api.polymarket.com"
 TZ = timezone(timedelta(hours=3, minutes=30))
-SOCCER = {"eng.1": "🏴 لیگ برتر انگلیس", "esp.1": "🇪🇸 لالیگا", "ger.1": "🇩🇪 بوندس‌لیگا", "ita.1": "🇮🇹 سری آ", "fra.1": "🇫🇷 لیگ ۱", "por.1": "🇵🇹 پرتغال", "ksa.1": "🇸 عربستان", "eng.2": "🏴 Championship", "esp.2": "🇪🇸 Segunda"}
+SOCCER = {"eng.1": "🏴 لیگ برتر انگلیس", "esp.1": "🇪 لالیگا", "ger.1": "🇩🇪 بوندس‌لیگا", "ita.1": "🇮🇹 سری آ", "fra.1": "🇫🇷 لیگ ۱", "por.1": "🇵🇹 پرتغال", "ksa.1": "🇸 عربستان", "eng.2": "🏴 Championship", "esp.2": "🇪🇸 Segunda"}
 TENNIS = {"atp": "🎾 ATP", "wta": "🎾 WTA"}
 WD = ["شنبه", "یکشنبه", "دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه"]
 MO = ["فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور", "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"]
@@ -55,14 +55,6 @@ def send(text, html=True):
     except Exception as ex:
         print("tg err", ex)
         return False
-
-def same_day(d1, d2):
-    try:
-        a = datetime.fromisoformat(d1.replace("Z", "+00:00"))
-        b = datetime.fromisoformat(d2.replace("Z", "+00:00"))
-        return abs((a - b).total_seconds()) < 30 * 3600
-    except Exception:
-        return True
 
 def is_closed(x):
     return x.get("closed") in (True, "true")
@@ -157,6 +149,14 @@ def tennis_fixtures(days=5):
         out += got
     return out
 
+def tennis_probe():
+    try:
+        r = httpx.get(f"{ESPN}/site/v2/sports/tennis/atp/scoreboard", timeout=15)
+        d = r.json()
+        return f"status={r.status_code} | keys={list(d.keys())[:6]} | events={len(d.get('events', []))}"
+    except Exception as ex:
+        return f"err: {ex}"
+
 def soccer_power(rank, d, home):
     base = 100 - int(rank) * 3
     played = d.get("played", 0)
@@ -209,7 +209,7 @@ def search_poly(home, away, sport, date=""):
         if is_closed(ev):
             continue
         t = norm(ev.get("title") or "")
-        if any(h in t for h in kh) and any(a in t for a in ka) and same_day(ev.get("startDate") or "", date):
+        if any(h in t for h in kh) and any(a in t for a in ka):
             ev["_tag"] = sport
             return ev, ""
     return None, json.dumps(d, ensure_ascii=False)[:200]
@@ -271,7 +271,7 @@ def find_poly(evlist, home, away, sport, date=""):
         if is_closed(ev):
             continue
         t = norm(ev.get("title") or "")
-        if any(h in t for h in kh) and any(a in t for a in ka) and same_day(ev.get("startDate") or "", date):
+        if any(h in t for h in kh) and any(a in t for a in ka):
             return ev
     return None
 
