@@ -1,4 +1,4 @@
-import httpx, json, math, os
+import httpx, json, math, os, unicodedata
 from datetime import datetime, timedelta, timezone
 
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
@@ -6,7 +6,7 @@ CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 ESPN = "https://site.api.espn.com/apis"
 POLY = "https://gamma-api.polymarket.com"
 TZ = timezone(timedelta(hours=3, minutes=30))
-SOCCER = {"eng.1": "🏴 لیگ برتر انگلیس", "esp.1": "🇪🇸 لالیگا", "ger.1": "🇩🇪 بوندس‌لیگا", "ita.1": "🇮🇹 سری آ", "fra.1": "🇫 لیگ ۱", "por.1": "🇵🇹 پرتغال", "ksa.1": "🇸 عربستان", "eng.2": "🏴 Championship", "esp.2": "🇪🇸 Segunda"}
+SOCCER = {"eng.1": "🏴 لیگ برتر انگلیس", "esp.1": "🇪🇸 لالیگا", "ger.1": "🇩🇪 بوندس‌لیگا", "ita.1": "🇮🇹 سری آ", "fra.1": "🇫🇷 لیگ ۱", "por.1": "🇵🇹 پرتغال", "ksa.1": "🇸 عربستان", "eng.2": "🏴 Championship", "esp.2": "🇪 Segunda"}
 TENNIS = {"atp": "🎾 ATP", "wta": "🎾 WTA"}
 WD = ["شنبه", "یکشنبه", "دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه"]
 MO = ["فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور", "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"]
@@ -15,6 +15,9 @@ MIN_EDGE = 0.03
 SOCCER_GAP = 45
 TENNIS_GAP = 30
 DEFAULT_RANK = 17
+
+def norm(s):
+    return "".join(c for c in unicodedata.normalize("NFKD", (s or "").lower()) if not unicodedata.combining(c))
 
 def jalali(dt):
     try:
@@ -106,7 +109,7 @@ def soccer_fixtures(days=5):
 
 def tennis_rankings():
     out = {"atp": {}, "wta": {}}
-    urls = {"atp": ["https://raw.githubusercontent.com/JeffSackmann/tennis_atp/master/atp_rankings_current.csv", "https://raw.githubusercontent.com/Kadantte/tennis_atp/master/atp_rankings_current.csv", "https://raw.githubusercontent.com/beta2k/tennis_atp/master/atp_rankings_current.csv"], "wta": ["https://raw.githubusercontent.com/JeffSackmann/tennis_wta/master/wta_rankings_current.csv", "https://raw.githubusercontent.com/Kadantte/tennis_wta/master/wta_rankings_current.csv"]}
+    urls = {"atp": ["https://raw.githubusercontent.com/JeffSackmann/tennis_atp/master/atp_rankings_current.csv", "https://raw.githubusercontent.com/Kadantte/tennis_atp/master/atp_rankings_current.csv", "https://raw.githubusercontent.com/beta2k/tennis_atp/master/atp_rankings_current.csv"], "wta": ["https://raw.githubusercontent.com/JeffSackmann/tennis_wta/master/wta_rankings_current.csv", "https://raw.githubusercontent.com/Kadantte/tennis_wta/master/wta_rankings_current.csv", "https://raw.githubusercontent.com/beta2k/tennis_wta/master/wta_rankings_current.csv"]}
     for tour, lst in urls.items():
         for url in lst:
             try:
@@ -127,18 +130,30 @@ def tennis_rankings():
 
 def tennis_fixtures(days=5):
     out = []
-    for i in range(days):
-        d = (datetime.now(timezone.utc) + timedelta(days=i)).strftime("%Y%m%d")
-        for tour, lname in TENNIS.items():
+    for tour, lname in TENNIS.items():
+        got = []
+        for i in range(days):
+            d = (datetime.now(timezone.utc) + timedelta(days=i)).strftime("%Y%m%d")
             try:
                 r = httpx.get(f"{ESPN}/site/v2/sports/tennis/{tour}/scoreboard", params={"dates": d}, timeout=15).json()
                 for ev in r.get("events", []):
                     cs = ev.get("competitions", [{}])[0].get("competitors", [])
                     ns = [((c.get("athlete") or c.get("team") or {}).get("displayName")) or "" for c in cs]
                     if len(ns) == 2 and ns[0] and ns[1]:
-                        out.append({"id": str(ev.get("id")), "sport": "tennis", "league": lname, "slug": tour, "date": ev.get("date", ""), "home": ns[0], "away": ns[1]})
+                        got.append({"id": str(ev.get("id")), "sport": "tennis", "league": lname, "slug": tour, "date": ev.get("date", ""), "home": ns[0], "away": ns[1]})
             except Exception as ex:
                 print("tfx err", tour, d, ex)
+        if not got:
+            try:
+                r = httpx.get(f"{ESPN}/site/v2/sports/tennis/{tour}/scoreboard", timeout=15).json()
+                for ev in r.get("events", []):
+                    cs = ev.get("competitions", [{}])[0].get("competitors", [])
+                    ns = [((c.get("athlete") or c.get("team") or {}).get("displayName")) or "" for c in cs]
+                    if len(ns) == 2 and ns[0] and ns[1]:
+                        got.append({"id": str(ev.get("id")), "sport": "tennis", "league": lname, "slug": tour, "date": ev.get("date", ""), "home": ns[0], "away": ns[1]})
+            except Exception as ex:
+                print("tfx2 err", tour, ex)
+        out += got
     return out
 
 def soccer_power(rank, d, home):
@@ -155,7 +170,7 @@ def tennis_power(rank):
     return 100 - 30 * math.log10(max(int(rank), 1) + 1)
 
 def keys(name, sport):
-    n = name.lower().strip()
+    n = norm(name).strip()
     parts = n.split()
     ks = [n]
     for p in parts:
@@ -192,7 +207,7 @@ def search_poly(home, away, sport, date=""):
     for ev in evs:
         if is_closed(ev):
             continue
-        t = (ev.get("title") or "").lower()
+        t = norm(ev.get("title") or "")
         if any(h in t for h in kh) and any(a in t for a in ka) and same_day(ev.get("startDate") or "", date):
             ev["_tag"] = sport
             return ev, ""
@@ -223,9 +238,9 @@ def poly_prices(ev, home, away, sport):
                 continue
             if set(str(x) for x in pr) <= {"0", "1"}:
                 continue
-            q = ((mk.get("question") or "") + " " + (mk.get("groupItemTitle") or "")).lower()
+            q = norm((mk.get("question") or "") + " " + (mk.get("groupItemTitle") or ""))
             for i, o in enumerate(oc):
-                ol = str(o).lower()
+                ol = norm(o)
                 if ol in ("yes", "no", "draw"):
                     continue
                 if any(k in ol for k in kh):
@@ -254,7 +269,7 @@ def find_poly(evlist, home, away, sport, date=""):
     for ev in evlist:
         if is_closed(ev):
             continue
-        t = (ev.get("title") or "").lower()
+        t = norm(ev.get("title") or "")
         if any(h in t for h in kh) and any(a in t for a in ka) and same_day(ev.get("startDate") or "", date):
             return ev
     return None
