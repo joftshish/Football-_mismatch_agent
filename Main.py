@@ -3,7 +3,7 @@ import traceback
 from datetime import datetime, timezone
 
 def main():
-    print("=== v15 ===")
+    print("=== v16 ===")
     st = C.load_state()
     noted = st.setdefault("notified", [])
     known = st.setdefault("known_poly", [])
@@ -12,11 +12,11 @@ def main():
     now = datetime.now(timezone.utc)
     ls = (now.year if now.month >= 7 else now.year - 1) - 1
     fx = C.soccer_fixtures() + C.tennis_fixtures()
+    nten = sum(1 for m in fx if m["sport"] == "tennis")
     cur = C.soccer_standings()
     last = C.soccer_standings(ls)
     tr = C.tennis_rankings()
     pev = C.poly_events()
-    print("fixtures:", len(fx), "poly:", len(pev))
     vb = mm = wl = skipped = 0
     rows = []
     dbg = []
@@ -25,9 +25,11 @@ def main():
         if not c:
             continue
         ev = C.find_poly(pev, m["home"], m["away"], m["sport"], m["date"])
+        src = "list"
         raw = ""
         if not ev:
             ev, raw = C.search_poly(m["home"], m["away"], m["sport"], m["date"])
+            src = "search"
         ph = pa = None
         if ev:
             ph, pa = C.poly_prices(ev, m["home"], m["away"], m["sport"])
@@ -54,22 +56,21 @@ def main():
                     known.append(eid)
         else:
             skipped += 1
+            status = f"poly:{src}/قیمت‌نه" if ev else "poly:نه"
             if raw and len(dbg) < 2:
                 dbg.append(f"{m['home']}-{m['away']}: {raw}")
+            rows.append((c["gap"], f"{m['home']} - {m['away']} | {round(c['gap'])} | {status}"))
             key = f"{m['home']}|{m['away']}"
-            rows.append((c["gap"], f"{m['home']} - {m['away']} | {round(c['gap'])} | بدون بازار"))
             if key not in watch_noted:
                 if C.notify_watch(m, c):
                     watch_noted.append(key)
                     watch.append({"home": m["home"], "away": m["away"], "sport": m["sport"], "slug": m["slug"], "date": m["date"], "league": m["league"]})
                     wl += 1
-    today = now.strftime("%Y-%m-%d")
-    if True:
-        rows.sort(reverse=True)
-        top = "\n".join(r[1] for r in rows[:8]) or "—"
-        extra = ("\n\n🔬 " + "\n".join(dbg)) if dbg else ""
-        C.send(f"📊 گزارش ایجنت v15\nبازی‌ها: {len(fx)} | بدون بازار: {skipped}\n💰 Value: {vb} | ⚔️ نابرابر: {mm} | 👀 Watchlist: {wl}\n\nبرترین‌ها:\n{top}{extra}", html=False)
-        st["last_summary"] = today
+    rows.sort(reverse=True)
+    top = "\n".join(r[1] for r in rows[:8]) or "—"
+    extra = ("\n\n🔬 " + "\n".join(dbg)) if dbg else ""
+    C.send(f"📊 گزارش v16 | {getattr(C, 'VERSION', 'CORE-GHADIMI!')}\nبازی‌ها: {len(fx)} (تنیس: {nten}) | بدون بازار: {skipped}\n💰 Value: {vb} | ⚔️ نابرابر: {mm} | 👀 Watch: {wl}\n\nبرترین‌ها:\n{top}{extra}", html=False)
+    st["last_summary"] = now.strftime("%Y-%m-%d")
     C.save_state(st)
     print("done", vb, mm, wl)
 
