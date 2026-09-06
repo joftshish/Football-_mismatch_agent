@@ -1,57 +1,77 @@
 import Core as C
-import json, traceback
-
-BAD_WORDS = {"45", "draw", "total", "over", "under", "exact", "score", "corners", "cards", "card", "penalty", "champion", "winner", "advance", "round", "tournament", "margin", "spread", "handicap", "series", "half", "ot", "shootout", "clean", "sheet", "substitute", "replace", "yellow", "red"}
-BAD_PHRASES = ["first half", "both teams", "to score", "win by", "extra time", "score first", "within the", "how many", "will there be", "correct score", "goals", "points"]
-
-def is_moneyline(q):
-    toks = set(q.replace(".", " ").replace(",", " ").split())
-    if toks & BAD_WORDS:
-        return False
-    for p in BAD_PHRASES:
-        if p in q:
-            return False
-    return True
+import traceback
+from datetime import datetime, timezone
 
 def main():
-    pev = C.poly_events()
-    msg = "🔬 DEBUG v3\n\n== A) بازارهای فوتبال ==\n"
-    for home, away in [("Lyon", "AJ Auxerre"), ("Wrexham", "Burnley")]:
-        ev = C.find_poly(pev, home, away, "soccer", "")
-        if not ev:
-            ev, _ = C.search_poly(home, away, "soccer", "")
-        if not ev:
-            msg += f"{home}: NOT found\n"
-            continue
-        msg += f"\n{home} vs {away}\n"
-        msg += f"title: {ev.get('title','?')[:50]}\n"
-        msg += f"start: {str(ev.get('startDate'))[:10]} | closed: {ev.get('closed')}\n"
-        for mk in C.get_markets(ev)[:8]:
-            q = ((mk.get("question") or "") + " " + (mk.get("groupItemTitle") or "")).lower()
-            oc = mk.get("outcomes")
-            pr = mk.get("outcomePrices")
-            mark = "ML" if is_moneyline(q) else "XX"
-            msg += f"  [{mark}] {q[:65]}\n"
-            msg += f"      oc: {str(oc)[:50]}\n"
-            msg += f"      pr: {str(pr)[:50]}\n"
-    msg += "\n== B) لوله تنیس ==\n"
-    tf = C.tennis_fixtures()
-    msg += f"tennis fixtures: {len(tf)}\n"
+    print("=== v15 ===")
+    st = C.load_state()
+    noted = st.setdefault("notified", [])
+    known = st.setdefault("known_poly", [])
+    watch = st.setdefault("watchlist", [])
+    watch_noted = st.setdefault("watch_noted", [])
+    now = datetime.now(timezone.utc)
+    ls = (now.year if now.month >= 7 else now.year - 1) - 1
+    fx = C.soccer_fixtures() + C.tennis_fixtures()
+    cur = C.soccer_standings()
+    last = C.soccer_standings(ls)
     tr = C.tennis_rankings()
-    na = len(tr.get("atp", {}))
-    nw = len(tr.get("wta", {}))
-    msg += f"ranks loaded -> atp: {na} | wta: {nw}\n"
-    if tf:
-        m = tf[0]
-        last_name = m["home"].lower().split()[-1]
-        msg += f"sample: {m['home']} vs {m['away']} ({m['slug']})\n"
-        msg += f"lookup '{last_name}' -> {tr.get(m['slug'], {}).get(last_name)}\n"
-    tev = [e for e in pev if e.get("_tag") == "tennis"]
-    msg += f"poly tennis events: {len(tev)}\n"
-    if tev:
-        msg += f"sample: {tev[0].get('title','?')[:60]}\n"
-    C.send(msg, html=False)
-    print(msg)
+    pev = C.poly_events()
+    print("fixtures:", len(fx), "poly:", len(pev))
+    vb = mm = wl = skipped = 0
+    rows = []
+    dbg = []
+    for m in fx:
+        c = C.compute(m, cur, last, tr)
+        if not c:
+            continue
+        ev = C.find_poly(pev, m["home"], m["away"], m["sport"], m["date"])
+        raw = ""
+        if not ev:
+            ev, raw = C.search_poly(m["home"], m["away"], m["sport"], m["date"])
+        ph = pa = None
+        if ev:
+            ph, pa = C.poly_prices(ev, m["home"], m["away"], m["sport"])
+        if ev and ph is not None:
+            price = ph if c["sh"] else pa
+            edge = c["prob"] - price
+            kl = C.kelly(c["prob"], price)
+            is_value = edge >= C.MIN_EDGE and kl > 0
+            lab = "کاملاً نابرابر 🔴" if c["gap"] >= c["thr"] + 10 else "به‌وضوح نابرابر 🟠"
+            a = {"title": "VALUE BET 💰" if is_value else "بازی نابرابر ⚔️", "league": m["league"], "date": m["date"], "home": m["home"], "away": m["away"], "stronger": c["stronger"], "prob": c["prob"], "price": price, "edge": edge, "kelly": kl if is_value else 0, "label": lab, "icon": "🎾" if m["sport"] == "tennis" else "⚽", "link": C.poly_link(ev), "note": None}
+            if c["low"]:
+                a["note"] = "⚠️ داده فصل جاری کم است"
+            if not is_value:
+                a["note"] = (a["note"] or "") + f"\n❌ لبه کم ({round(edge*100,1)}%) — ارزش بستن ندارد"
+            rows.append((c["gap"], f"{m['home']} - {m['away']} | {round(c['gap'])} | بازار {round(price*100)}% | لبه {round(edge*100,1)}"))
+            eid = str(ev.get("id"))
+            if m["id"] not in noted and eid not in known:
+                if C.notify("💰" if is_value else "⚔️", a):
+                    if is_value:
+                        vb += 1
+                    else:
+                        mm += 1
+                    noted.append(m["id"])
+                    known.append(eid)
+        else:
+            skipped += 1
+            if raw and len(dbg) < 2:
+                dbg.append(f"{m['home']}-{m['away']}: {raw}")
+            key = f"{m['home']}|{m['away']}"
+            rows.append((c["gap"], f"{m['home']} - {m['away']} | {round(c['gap'])} | بدون بازار"))
+            if key not in watch_noted:
+                if C.notify_watch(m, c):
+                    watch_noted.append(key)
+                    watch.append({"home": m["home"], "away": m["away"], "sport": m["sport"], "slug": m["slug"], "date": m["date"], "league": m["league"]})
+                    wl += 1
+    today = now.strftime("%Y-%m-%d")
+    if True:
+        rows.sort(reverse=True)
+        top = "\n".join(r[1] for r in rows[:8]) or "—"
+        extra = ("\n\n🔬 " + "\n".join(dbg)) if dbg else ""
+        C.send(f"📊 گزارش ایجنت v15\nبازی‌ها: {len(fx)} | بدون بازار: {skipped}\n💰 Value: {vb} | ⚔️ نابرابر: {mm} | 👀 Watchlist: {wl}\n\nبرترین‌ها:\n{top}{extra}", html=False)
+        st["last_summary"] = today
+    C.save_state(st)
+    print("done", vb, mm, wl)
 
 if __name__ == "__main__":
     try:
