@@ -10,7 +10,12 @@ def api(method, **kw):
         print("tg err", ex)
         return {}
 
-HELP = "🤖 دستورات:\nراهنما → منو\nوضعیت → تنظیمات\nلیگ‌ها → فهرست لیگ‌ها\nخاموش <لیگ> / روشن <لیگ>\nلبه <عدد> → حداقل لبه درصد\nفقط ارزش / همه\nلینک‌ها → لینک‌های اخیر\nبت <تیم> <قیمت> <درصد>\nگزارش → آمار بت‌ها"
+MENU = {"inline_keyboard": [[{"text": "📊 وضعیت", "callback_data": "وضعیت"}, {"text": "🏟 لیگ‌ها", "callback_data": "لیگ‌ها"}], [{"text": "🔁 تکرار", "callback_data": "تکرار"}, {"text": "🔗 لینک‌ها", "callback_data": "لینک‌ها"}], [{"text": "💰 فقط ارزش", "callback_data": "فقط ارزش"}, {"text": "📢 همه", "callback_data": "همه"}], [{"text": "📈 گزارش بت", "callback_data": "گزارش"}, {"text": "❓ راهنما", "callback_data": "راهنما"}]]}
+
+HELP = "🤖 دستورات:\nراهنما/منو → منوی دکمه‌ای\nوضعیت → تنظیمات\nلیگ‌ها → فهرست لیگ‌ها\nخاموش <لیگ> / روشن <لیگ>\nلبه <عدد> → حداقل لبه درصد\nفقط ارزش / همه\nلینک‌ها → لینک‌های اخیر\nتکرار → فراخوانی دوباره نوتیف‌ها\nبت <تیم> <قیمت> <درصد>\nگزارش → آمار بت‌ها"
+
+def send_menu():
+    api("sendMessage", chat_id=C.CHAT_ID, text="🎛️ منوی ایجنت — یه گزینه رو بزن:", reply_markup=MENU)
 
 def find_league(q):
     qn = C.norm(q)
@@ -84,7 +89,8 @@ def report(st):
 
 def handle(text, st, prefs):
     t = text.strip()
-    if t in ("راهنما", "/start", "help"):
+    if t in ("راهنما", "/start", "help", "منو"):
+        send_menu()
         return HELP
     if t == "وضعیت":
         ov = "فقط ارزش 💰" if prefs.get("only_value") else "همه 📢"
@@ -118,6 +124,9 @@ def handle(text, st, prefs):
     if t == "همه":
         prefs["only_value"] = False
         return "📢 حالت: همه نوتیف‌ها"
+    if t == "تکرار":
+        prefs["force"] = True
+        return "🔁 اوکی! حالا Actions → Check Mismatches → Run workflow رو بزن تا همه نوتیف‌ها یک‌بار دوباره بیان"
     if t == "لینک‌ها":
         ls = st.get("last_links", [])
         return "\n\n".join(ls[-5:]) if ls else "لینکی ثبت نشده"
@@ -141,7 +150,14 @@ def main():
     data = api("getUpdates", offset=off, timeout=5)
     for u in data.get("result", []):
         off = u["update_id"] + 1
-        text = ((u.get("message") or {}).get("text")) or ""
+        cb = u.get("callback_query")
+        if cb:
+            api("answerCallbackQuery", callback_query_id=cb["id"])
+            text = cb.get("data") or ""
+        else:
+            text = ((u.get("message") or {}).get("text")) or ""
+        if not text:
+            continue
         reply = handle(text, st, prefs)
         if reply:
             C.send(reply, html=False)
