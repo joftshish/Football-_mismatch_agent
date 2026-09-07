@@ -3,7 +3,7 @@ import traceback
 from datetime import datetime, timezone
 
 def main():
-    print("=== v22 ===")
+    print("=== v23 ===")
     st = C.load_state()
     prefs = st.get("prefs", {})
     force = prefs.get("force", False)
@@ -55,10 +55,10 @@ def main():
             elif not c.get("solid", False):
                 note = "⚠️ اوایل فصل/داده کم — فقط اطلاع، بت سنگین ممنوع"
             elif not is_value and edge < min_e:
-                note = f"❌ لبه کم ({round(edge*100,1)}%) — ارزش بستن ندارد"
+                note = f"❌ لبه کم ({C.fa(round(edge*100,1))}٪) — ارزش بستن ندارد"
             lab = "کاملاً نابرابر 🔴" if c["gap"] >= c["thr"] + 10 else "به‌وضوح نابرابر 🟠"
-            a = {"title": "VALUE BET 💰" if is_value else "بازی نابرابر ⚔️", "league": m["league"], "date": m["date"], "home": m["home"], "away": m["away"], "stronger": c["stronger"], "prob": c["prob"], "price": price, "edge": edge, "kelly": kl if is_value else 0, "label": lab, "icon": "🎾" if m["sport"] == "tennis" else "⚽", "link": C.poly_link(ev), "note": note}
-            rows.append((c["gap"], f"{m['home']} - {m['away']} | {round(c['gap'])} | بازار {round(price*100)}% | لبه {round(edge*100,1)}"))
+            a = {"title": "VALUE BET 💰" if is_value else "بازی نابرابر ⚔️", "league": m["league"], "date": m["date"], "home": m["home"], "away": m["away"], "stronger": c["stronger"], "prob": c["prob"], "price": price, "edge": edge, "kelly": kl if is_value else 0, "label": lab, "icon": "🎾" if m["sport"] == "tennis" else "⚽", "link": C.poly_link(ev), "note": note, "hr": c.get("hr"), "ar": c.get("ar"), "rsrc": c.get("rsrc")}
+            rows.append((c["gap"], f"{m['home']} - {m['away']}\n   گپ {C.fa(round(c['gap']))} | بازار {C.fa(round(price*100))}٪ | لبه {C.fa(round(edge*100,1))}٪"))
             eid = str(ev.get("id"))
             if m["id"] not in noted and eid not in known:
                 if only_v and not is_value:
@@ -76,10 +76,10 @@ def main():
                         links.append(f"{m['home']} vs {m['away']}\n{a['link']}")
         else:
             skipped += 1
-            status = f"poly:{src}/قیمت‌نه" if ev else "poly:نه"
+            status = "بدون بازار" if not ev else f"بازار هست/قیمت نه ({src})"
             if raw and len(dbg) < 2:
                 dbg.append(f"{m['home']}-{m['away']}: {raw}")
-            rows.append((c["gap"], f"{m['home']} - {m['away']} | {round(c['gap'])} | {status}"))
+            rows.append((c["gap"], f"{m['home']} - {m['away']}\n   گپ {C.fa(round(c['gap']))} | {status}"))
             key = f"{m['home']}|{m['away']}"
             if key not in watch_noted:
                 if not only_v and C.notify_watch(m, c):
@@ -90,7 +90,7 @@ def main():
     rows.sort(reverse=True)
     top = "\n".join(r[1] for r in rows[:8]) or "—"
     extra = ("\n\n🔬 " + "\n".join(dbg)) if dbg else ""
-    C.send(f"📊 گزارش v22{' (تکرار🔁)' if force else ''} | {getattr(C, 'VERSION', 'CORE-GHADIMI!')}\nبازی‌ها: {len(fx)} | بدون بازار: {skipped}\n💰 Value: {vb} | ⚔️ نابرابر: {mm} | 👀 Watch: {wl}\n\nبرترین‌ها:\n{top}{extra}", html=False)
+    C.send(f"📊 گزارش v23 | {getattr(C, 'VERSION', 'CORE-GHADIMI!')}\nبازی‌ها: {C.fa(len(fx))} | بدون بازار: {C.fa(skipped)}\n💰 Value: {C.fa(vb)} | ⚔️ نابرابر: {C.fa(mm)} | 👀 Watch: {C.fa(wl)}\n\nبرترین‌ها:\n{top}{extra}", html=False)
     st["last_summary"] = now.strftime("%Y-%m-%d")
     C.save_state(st)
     print("done", vb, mm, wl)
