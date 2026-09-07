@@ -1,14 +1,14 @@
 import httpx, json, math, os, unicodedata
 from datetime import datetime, timedelta, timezone
 
-VERSION = "core14"
+VERSION = "core15"
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 ESPN = "https://site.api.espn.com/apis"
 POLY = "https://gamma-api.polymarket.com"
 TZ = timezone(timedelta(hours=3, minutes=30))
 FAD = "۰۱۲۳۴۵۶۷۸۹"
-SOCCER = {"eng.1": "🏴 لیگ برتر انگلیس", "esp.1": "🇪🇸 لالیگا", "ger.1": "🇩🇪 بوندس‌لیگا", "ita.1": "🇮🇹 سری آ", "fra.1": "🇫🇷 لیگ ۱", "por.1": "🇵🇹 پرتغال", "ksa.1": "🇸 عربستان", "eng.2": "🏴 Championship", "esp.2": "🇪 Segunda", "usa.1": "🇺 MLS", "bra.1": "🇧🇷 برزیل", "mex.1": "🇲 مکزیک", "ned.1": "🇳 هلند", "tur.1": "🇹 ترکیه", "jpn.1": "🇯 ژاپن", "ger.2": "🇩 بوندس‌لیگا۲", "ita.2": "🇮 سری B", "eng.3": "🏴 League One", "fra.2": "🇫 لیگ ۲", "arg.1": "🇦 آرژانتین"}
+SOCCER = {"eng.1": "🏴 لیگ برتر انگلیس", "esp.1": "🇪 لالیگا", "ger.1": "🇩🇪 بوندس‌لیگا", "ita.1": "🇮🇹 سری آ", "fra.1": "🇫 لیگ ۱", "por.1": "🇵🇹 پرتغال", "ksa.1": "🇸 عربستان", "eng.2": "🏴 Championship", "esp.2": "🇪 Segunda", "usa.1": "🇺 MLS", "bra.1": "🇧🇷 برزیل", "mex.1": "🇲 مکزیک", "ned.1": "🇳 هلند", "tur.1": "🇹 ترکیه", "jpn.1": "🇯 ژاپن", "ger.2": "🇩 بوندس‌لیگا۲", "ita.2": "🇮 سری B", "eng.3": "🏴 League One", "fra.2": "🇫 لیگ ۲", "arg.1": "🇦 آرژانتین"}
 TENNIS = {"atp": "🎾 ATP", "wta": "🎾 WTA"}
 WD = ["شنبه", "یکشنبه", "دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه"]
 MO = ["فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور", "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"]
@@ -263,17 +263,34 @@ def poly_prices(ev, home, away, sport):
                 ol = norm(o)
                 if ol in ("yes", "no", "draw"):
                     continue
+                pv = float(pr[i])
+                if pv < 0.02 or pv > 0.98:
+                    continue
                 if any(k in ol for k in kh):
-                    ph = float(pr[i])
+                    ph = pv
                 elif any(k in ol for k in ka):
-                    pa = float(pr[i])
+                    pa = pv
             if len(oc) == 2 and str(oc[0]).lower() == "yes":
                 mh = any(k in q for k in kh)
                 ma = any(k in q for k in ka)
+                yesp = None
+                if mk.get("bestAsk") is not None:
+                    try:
+                        ba = float(mk.get("bestAsk"))
+                        if 0.02 <= ba <= 0.98:
+                            yesp = ba
+                    except Exception:
+                        yesp = None
+                else:
+                    p0 = float(pr[0])
+                    if 0.02 <= p0 <= 0.98:
+                        yesp = p0
+                if yesp is None:
+                    continue
                 if mh and not ma and ph is None:
-                    ph = float(pr[0])
+                    ph = yesp
                 elif ma and not mh and pa is None:
-                    pa = float(pr[0])
+                    pa = yesp
         except Exception:
             continue
         if ph is not None and pa is not None:
