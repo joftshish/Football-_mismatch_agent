@@ -3,21 +3,25 @@ import traceback
 from datetime import datetime, timezone
 
 def main():
-    print("=== v21 ===")
+    print("=== v22 ===")
     st = C.load_state()
-    noted = st.setdefault("notified", [])
-    known = st.setdefault("known_poly", [])
-    watch = st.setdefault("watchlist", [])
-    watch_noted = st.setdefault("watch_noted", [])
-    links = st.setdefault("last_links", [])
     prefs = st.get("prefs", {})
+    force = prefs.get("force", False)
+    if force:
+        noted, known, watch_noted = [], [], []
+        prefs["force"] = False
+    else:
+        noted = st.setdefault("notified", [])
+        known = st.setdefault("known_poly", [])
+        watch_noted = st.setdefault("watch_noted", [])
+    watch = st.setdefault("watchlist", [])
+    links = st.setdefault("last_links", [])
     off_l = set(prefs.get("off", []))
     only_v = prefs.get("only_value", False)
     min_e = prefs.get("min_edge", C.MIN_EDGE)
     now = datetime.now(timezone.utc)
     ls = (now.year if now.month >= 7 else now.year - 1) - 1
     fx = C.soccer_fixtures() + C.tennis_fixtures()
-    nten = sum(1 for m in fx if m["sport"] == "tennis")
     cur = C.soccer_standings()
     last = C.soccer_standings(ls)
     tr = C.tennis_rankings()
@@ -44,11 +48,11 @@ def main():
             price = ph if c["sh"] else pa
             edge = c["prob"] - price
             kl = C.kelly(c["prob"], price)
-            is_value = c["solid"] and edge >= min_e and edge <= C.MAX_EDGE and kl > 0
+            is_value = c.get("solid", False) and edge >= min_e and edge <= C.MAX_EDGE and kl > 0
             note = None
             if edge > C.MAX_EDGE:
                 note = "⚠️ لبه مشکوک (زیاد) — با احتیاط!"
-            elif not c["solid"]:
+            elif not c.get("solid", False):
                 note = "⚠️ اوایل فصل/داده کم — فقط اطلاع، بت سنگین ممنوع"
             elif not is_value and edge < min_e:
                 note = f"❌ لبه کم ({round(edge*100,1)}%) — ارزش بستن ندارد"
@@ -86,8 +90,7 @@ def main():
     rows.sort(reverse=True)
     top = "\n".join(r[1] for r in rows[:8]) or "—"
     extra = ("\n\n🔬 " + "\n".join(dbg)) if dbg else ""
-    probe = ("\n\n🎾 probe: " + C.tennis_probe()) if nten == 0 else ""
-    C.send(f"📊 گزارش v21 | {getattr(C, 'VERSION', 'CORE-GHADIMI!')}\nبازی‌ها: {len(fx)} (تنیس: {nten}) | بدون بازار: {skipped}\n💰 Value: {vb} | ⚔️ نابرابر: {mm} | 👀 Watch: {wl}\n\nبرترین‌ها:\n{top}{extra}{probe}", html=False)
+    C.send(f"📊 گزارش v22{' (تکرار🔁)' if force else ''} | {getattr(C, 'VERSION', 'CORE-GHADIMI!')}\nبازی‌ها: {len(fx)} | بدون بازار: {skipped}\n💰 Value: {vb} | ⚔️ نابرابر: {mm} | 👀 Watch: {wl}\n\nبرترین‌ها:\n{top}{extra}", html=False)
     st["last_summary"] = now.strftime("%Y-%m-%d")
     C.save_state(st)
     print("done", vb, mm, wl)
