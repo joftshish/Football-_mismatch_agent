@@ -1,5 +1,5 @@
 import Core as C
-import httpx, traceback
+import httpx, time, traceback
 from datetime import datetime, timezone
 
 def api(method, **kw):
@@ -9,6 +9,13 @@ def api(method, **kw):
     except Exception as ex:
         print("tg err", ex)
         return {}
+
+def send_safe(text):
+    ok = C.send(text, html=False)
+    if not ok:
+        time.sleep(2)
+        ok = C.send(text, html=False)
+    return ok
 
 MENU = {"inline_keyboard": [[{"text": "📊 وضعیت", "callback_data": "وضعیت"}, {"text": "🏟 لیگ‌ها", "callback_data": "لیگ‌ها"}], [{"text": "🔁 تکرار", "callback_data": "تکرار"}, {"text": "🔗 لینک‌ها", "callback_data": "لینک‌ها"}], [{"text": "💰 فقط ارزش", "callback_data": "فقط ارزش"}, {"text": "📢 همه", "callback_data": "همه"}], [{"text": "📈 گزارش بت", "callback_data": "گزارش"}, {"text": "❓ راهنما", "callback_data": "راهنما"}]]}
 
@@ -148,19 +155,25 @@ def main():
     prefs = st.setdefault("prefs", {"off": [], "only_value": False, "min_edge": 0.03})
     off = st.get("tg_offset", 0)
     data = api("getUpdates", offset=off, timeout=5)
-    for u in data.get("result", []):
+    res = data.get("result", [])
+    print("updates received:", len(res))
+    for u in res:
         off = u["update_id"] + 1
         cb = u.get("callback_query")
         if cb:
+            print("callback data:", repr(cb.get("data")))
             api("answerCallbackQuery", callback_query_id=cb["id"])
             text = cb.get("data") or ""
         else:
             text = ((u.get("message") or {}).get("text")) or ""
+            print("message text:", repr(text))
         if not text:
             continue
         reply = handle(text, st, prefs)
-        if reply:
-            C.send(reply, html=False)
+        if not reply:
+            reply = "🤖 متوجه نشدم؛ «منو» رو بزن تا گزینه‌ها رو ببینی"
+        ok = send_safe(reply)
+        print("reply sent:", ok)
     st["tg_offset"] = off
     bets = st.get("bets", [])
     bank = st.setdefault("bank", 100.0)
@@ -172,22 +185,22 @@ def main():
                 continue
         except Exception:
             continue
-        res = result_of(b)
-        if not res:
+        res2 = result_of(b)
+        if not res2:
             continue
         stake = bank * b["pct"] / 100
-        if res == "win":
+        if res2 == "win":
             profit = stake * (1 / b["price"] - 1)
             bank += profit
             b["status"] = "win"
-            C.send(f"✅ بت برد! {b['team']}\nسود: +{round(profit,2)} | 💳 بانک: {round(bank,1)}")
-        elif res == "lose":
+            send_safe(f"✅ بت برد! {b['team']}\nسود: +{round(profit,2)} | 💳 بانک: {round(bank,1)}")
+        elif res2 == "lose":
             bank -= stake
             b["status"] = "lose"
-            C.send(f"❌ بت باخت: {b['team']}\nضرر: -{round(stake,2)} | 💳 بانک: {round(bank,1)}")
+            send_safe(f"❌ بت باخت: {b['team']}\nضرر: -{round(stake,2)} | 💳 بانک: {round(bank,1)}")
         else:
             b["status"] = "push"
-            C.send(f"↩️ مساوی — برگشت سرمایه: {b['team']}")
+            send_safe(f"↩️ مساوی — برگشت سرمایه: {b['team']}")
     st["bank"] = bank
     st["bets"] = bets[-200:]
     C.save_state(st)
