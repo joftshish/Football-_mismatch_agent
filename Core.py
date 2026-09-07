@@ -1,13 +1,14 @@
 import httpx, json, math, os, unicodedata
 from datetime import datetime, timedelta, timezone
 
-VERSION = "core13"
+VERSION = "core14"
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 ESPN = "https://site.api.espn.com/apis"
 POLY = "https://gamma-api.polymarket.com"
 TZ = timezone(timedelta(hours=3, minutes=30))
-SOCCER = {"eng.1": "🏴 لیگ برتر انگلیس", "esp.1": "🇪🇸 لالیگا", "ger.1": "🇩🇪 بوندس‌لیگا", "ita.1": "🇮🇹 سری آ", "fra.1": "🇫🇷 لیگ ۱", "por.1": "🇵🇹 پرتغال", "ksa.1": "🇸 عربستان", "eng.2": "🏴 Championship", "esp.2": "🇪🇸 Segunda", "usa.1": "🇺🇸 MLS", "bra.1": "🇧🇷 برزیل", "mex.1": "🇲🇽 مکزیک", "ned.1": "🇳 هلند", "tur.1": "🇹🇷 ترکیه", "jpn.1": "🇯🇵 ژاپن", "ger.2": "🇩🇪 بوندس‌لیگا۲", "ita.2": "🇮 سری B", "eng.3": "🏴 League One", "fra.2": "🇫🇷 لیگ ۲", "arg.1": "🇦 آرژانتین"}
+FAD = "۰۱۲۳۴۵۶۷۸۹"
+SOCCER = {"eng.1": "🏴 لیگ برتر انگلیس", "esp.1": "🇪🇸 لالیگا", "ger.1": "🇩🇪 بوندس‌لیگا", "ita.1": "🇮🇹 سری آ", "fra.1": "🇫🇷 لیگ ۱", "por.1": "🇵🇹 پرتغال", "ksa.1": "🇸 عربستان", "eng.2": "🏴 Championship", "esp.2": "🇪 Segunda", "usa.1": "🇺 MLS", "bra.1": "🇧🇷 برزیل", "mex.1": "🇲 مکزیک", "ned.1": "🇳 هلند", "tur.1": "🇹 ترکیه", "jpn.1": "🇯 ژاپن", "ger.2": "🇩 بوندس‌لیگا۲", "ita.2": "🇮 سری B", "eng.3": "🏴 League One", "fra.2": "🇫 لیگ ۲", "arg.1": "🇦 آرژانتین"}
 TENNIS = {"atp": "🎾 ATP", "wta": "🎾 WTA"}
 WD = ["شنبه", "یکشنبه", "دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه"]
 MO = ["فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور", "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"]
@@ -17,6 +18,9 @@ MAX_EDGE = 0.20
 SOCCER_GAP = 45
 TENNIS_GAP = 30
 DEFAULT_RANK = 17
+
+def fa(x):
+    return "".join(FAD[int(ch)] if ch.isdigit() else ch for ch in str(x))
 
 def norm(s):
     return "".join(c for c in unicodedata.normalize("NFKD", (s or "").lower()) if not unicodedata.combining(c))
@@ -292,6 +296,8 @@ def find_poly(evlist, home, away, sport, date=""):
 
 def compute(m, cur, last, tr):
     solid = False
+    rsrc = "cur"
+    hr = ar = None
     if m["sport"] == "soccer":
         t = cur.get(m["slug"], {})
         hd, ad = t.get(m["home"], {}), t.get(m["away"], {})
@@ -304,6 +310,7 @@ def compute(m, cur, last, tr):
             hr = hd.get("rank", DEFAULT_RANK)
             ar = ad.get("rank", DEFAULT_RANK)
         else:
+            rsrc = "last"
             lh = last.get(m["slug"], {}).get(m["home"], {})
             la = last.get(m["slug"], {}).get(m["away"], {})
             solid = lh.get("played", 0) >= 20 and la.get("played", 0) >= 20
@@ -319,12 +326,13 @@ def compute(m, cur, last, tr):
         hp, ap = tennis_power(hr), tennis_power(ar)
         low = False
         solid = True
+        rsrc = "rank"
     gap = abs(hp - ap)
     thr = SOCCER_GAP if m["sport"] == "soccer" else TENNIS_GAP
     if gap < thr:
         return None
     sh = hp > ap
-    return {"gap": gap, "thr": thr, "stronger": m["home"] if sh else m["away"], "sh": sh, "prob": model_prob(gap), "low": low, "solid": solid}
+    return {"gap": gap, "thr": thr, "stronger": m["home"] if sh else m["away"], "sh": sh, "prob": model_prob(gap), "low": low, "solid": solid, "hr": hr, "ar": ar, "rsrc": rsrc}
 
 def load_state():
     if os.path.exists("state.json"):
@@ -348,9 +356,13 @@ def notify(emoji, a):
         jd, tm = jalali(dt)
     except Exception:
         jd, tm = a["date"], ""
-    t = f"{emoji} <b>{a['title']}</b>\n\n🏆 {a['league']}\n📅 {jd} — ساعت {tm}\n\n{a['icon']} <b>{a['home']}</b> vs <b>{a['away']}</b>\n\n📊 مدل ما: {round(a['prob']*100)}% برد {a['stronger']}\n💰 بازار Polymarket: {round(a['price']*100)}%\n📈 لبه: {round(a['edge']*100,1)}%"
+    t = f"{emoji} <b>{a['title']}</b>\n\n🏆 {a['league']}\n📅 {jd} — ساعت {tm}\n\n{a['icon']} <b>{a['home']}</b> vs <b>{a['away']}</b>"
+    if a.get("hr") is not None:
+        src = {"cur": "فصل جاری", "last": "فصل قبل", "rank": "رنکینگ جهانی"}.get(a.get("rsrc"), "")
+        t += f"\n🏅 رتبه: {a['home']} → {fa(a['hr'])} | {a['away']} → {fa(a['ar'])} ({src})"
+    t += f"\n\n📊 مدل ما: {fa(round(a['prob']*100))}٪ برد {a['stronger']}\n💰 بازار Polymarket: {fa(round(a['price']*100))}٪\n📈 لبه: {fa(round(a['edge']*100,1))}٪"
     if a.get("kelly"):
-        t += f"\n💵 پیشنهاد Kelly: {round(a['kelly']*100,1)}% سرمایه"
+        t += f"\n💵 پیشنهاد Kelly: {fa(round(a['kelly']*100,1))}٪ سرمایه"
     t += f"\n📋 {a['label']}"
     if a.get("note"):
         t += f"\n{a['note']}"
@@ -365,5 +377,9 @@ def notify_watch(m, c):
     except Exception:
         jd, tm = m["date"], ""
     icon = "🎾" if m["sport"] == "tennis" else "⚽"
-    t = f"👀 <b>بازی نابرابر — منتظر بازار Polymarket</b>\n\n🏆 {m['league']}\n📅 {jd} — ساعت {tm}\n\n{icon} <b>{m['home']}</b> vs <b>{m['away']}</b>\n\n📊 مدل: {round(c['prob']*100)}% برد {c['stronger']}\n💰 بازار: هنوز باز نشده\n\n⏰ Fast Scan هر 5 دقیقه چک می‌کنه؛ به محض باز شدن، نوتیف ⚡ با لینک مستقیم می‌گیری"
+    t = f"👀 <b>بازی نابرابر — منتظر بازار Polymarket</b>\n\n🏆 {m['league']}\n📅 {jd} — ساعت {tm}\n\n{icon} <b>{m['home']}</b> vs <b>{m['away']}</b>"
+    if c.get("hr") is not None:
+        src = {"cur": "فصل جاری", "last": "فصل قبل", "rank": "رنکینگ جهانی"}.get(c.get("rsrc"), "")
+        t += f"\n🏅 رتبه: {m['home']} → {fa(c['hr'])} | {m['away']} → {fa(c['ar'])} ({src})"
+    t += f"\n\n📊 مدل: {fa(round(c['prob']*100))}٪ برد {c['stronger']}\n💰 بازار: هنوز باز نشده\n\n⏰ Fast Scan هر ۵ دقیقه چک می‌کنه؛ به محض باز شدن، نوتیف ⚡ با لینک مستقیم می‌گیری"
     return send(t)
