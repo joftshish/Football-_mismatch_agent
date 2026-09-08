@@ -1,6 +1,13 @@
 import Core as C
 import traceback
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+
+def is_past(ds, grace=1.0):
+    try:
+        dt = datetime.fromisoformat(ds.replace("Z", "+00:00"))
+        return datetime.now(timezone.utc) > dt + timedelta(hours=grace)
+    except Exception:
+        return False
 
 def analyze_ev(ev, cur, last, tr, min_e):
     title = (ev.get("title") or "").strip()
@@ -37,13 +44,14 @@ def analyze_ev(ev, cur, last, tr, min_e):
     kl = C.kelly(c["prob"], price)
     if edge < min_e or edge > C.MAX_EDGE or kl <= 0 or not c["solid"]:
         return None
-    return {"title": "VALUE BET زودهنگام ⚡", "league": m["league"], "date": m["date"], "home": home, "away": away, "stronger": c["stronger"], "prob": c["prob"], "price": price, "edge": edge, "kelly": kl, "label": "به‌وضوح نابرابر 🟠", "icon": "🎾" if sport == "tennis" else "⚽", "link": C.poly_link(ev), "note": "⚡ بازار تازه ایجاد شد — برتری زمانی فعال شد"}
+    return {"title": "VALUE BET زودهنگام ⚡", "league": m["league"], "date": m["date"], "home": home, "away": away, "stronger": c["stronger"], "prob": c["prob"], "price": price, "edge": edge, "kelly": kl, "label": "به‌وضوح نابرابر 🟠", "icon": "🎾" if sport == "tennis" else "⚽", "link": C.poly_link(ev), "note": "⚡ بازار تازه ایجاد شد — برتری زمانی فعال شد", "hcr": c.get("hcr"), "hlr": c.get("hlr"), "acr": c.get("acr"), "alr": c.get("alr"), "bh": c.get("bh"), "ba": c.get("ba")}
 
 def main():
     st = C.load_state()
     known = st.setdefault("known_poly", [])
     noted = st.setdefault("notified", [])
     watch = st.setdefault("watchlist", [])
+    watch[:] = [w for w in watch if not is_past(w.get("date", ""))]
     links = st.setdefault("last_links", [])
     prefs = st.get("prefs", {})
     off_l = set(prefs.get("off", []))
@@ -80,7 +88,7 @@ def main():
             edge = c["prob"] - price
             kl = C.kelly(c["prob"], price)
             is_value = c["solid"] and edge >= min_e and edge <= C.MAX_EDGE and kl > 0
-            a = {"title": "بازار باز شد + VALUE BET 💰⚡" if is_value else "بازار Polymarket باز شد ⚡", "league": w["league"], "date": w["date"], "home": w["home"], "away": w["away"], "stronger": c["stronger"], "prob": c["prob"], "price": price, "edge": edge, "kelly": kl if is_value else 0, "label": "به‌وضوح نابرابر 🟠", "icon": "🎾" if w["sport"] == "tennis" else "⚽", "link": C.poly_link(ev), "note": None if is_value else f"❌ لبه کم ({round(edge*100,1)}%) — فقط برای اطلاع"}
+            a = {"title": "بازار باز شد + VALUE BET 💰⚡" if is_value else "بازار Polymarket باز شد ⚡", "league": w["league"], "date": w["date"], "home": w["home"], "away": w["away"], "stronger": c["stronger"], "prob": c["prob"], "price": price, "edge": edge, "kelly": kl if is_value else 0, "label": "به‌وضوح نابرابر 🟠", "icon": "🎾" if w["sport"] == "tennis" else "", "link": C.poly_link(ev), "note": None if is_value else f"❌ لبه کم ({C.fa(round(edge*100,1))}٪) — فقط برای اطلاع", "hcr": c.get("hcr"), "hlr": c.get("hlr"), "acr": c.get("acr"), "alr": c.get("alr"), "bh": c.get("bh"), "ba": c.get("ba")}
             if only_v and not is_value:
                 known.append(str(ev.get("id")))
                 continue
