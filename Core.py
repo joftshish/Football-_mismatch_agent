@@ -7,7 +7,7 @@ CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 ESPN = "https://site.api.espn.com/apis"
 POLY = "https://gamma-api.polymarket.com"
 TZ = timezone(timedelta(hours=3, minutes=30))
-FAD = "۰۱۳۴۵۷۸۹"
+FAD = "".join(chr(1632 + i) for i in range(10))
 SOCCER = {"eng.1": "🏴 لیگ برتر انگلیس", "esp.1": "🇪🇸 لالیگا", "ger.1": "🇩 بوندس‌لیگا", "ita.1": "🇮🇹 سری آ", "fra.1": "🇫🇷 لیگ ۱", "por.1": "🇵 پرتغال", "ksa.1": "🇸 عربستان", "eng.2": "🏴 Championship", "esp.2": "🇪🇸 Segunda", "usa.1": "🇺🇸 MLS", "bra.1": "🇧🇷 برزیل", "mex.1": "🇲🇽 مکزیک", "ned.1": "🇳 هلند", "tur.1": "🇹🇷 ترکیه", "jpn.1": "🇯🇵 ژاپن", "ger.2": "🇩🇪 بوندس‌لیگا۲", "ita.2": "🇮 سری B", "eng.3": "🏴 League One", "fra.2": "🇫🇷 لیگ ۲", "arg.1": "🇦🇷 آرژانتین"}
 VOLATILE = {"eng.2", "eng.3", "esp.2", "fra.2", "ita.2", "ger.2"}
 TENNIS = {"atp": "🎾 ATP", "wta": "🎾 WTA"}
