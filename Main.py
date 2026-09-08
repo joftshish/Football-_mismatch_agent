@@ -1,9 +1,16 @@
 import Core as C
 import traceback
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+
+def is_past(ds, grace=1.0):
+    try:
+        dt = datetime.fromisoformat(ds.replace("Z", "+00:00"))
+        return datetime.now(timezone.utc) > dt + timedelta(hours=grace)
+    except Exception:
+        return False
 
 def main():
-    print("=== v23 ===")
+    print("=== v24 ===")
     st = C.load_state()
     prefs = st.get("prefs", {})
     force = prefs.get("force", False)
@@ -15,6 +22,7 @@ def main():
         known = st.setdefault("known_poly", [])
         watch_noted = st.setdefault("watch_noted", [])
     watch = st.setdefault("watchlist", [])
+    watch[:] = [w for w in watch if not is_past(w.get("date", ""))]
     links = st.setdefault("last_links", [])
     off_l = set(prefs.get("off", []))
     only_v = prefs.get("only_value", False)
@@ -75,6 +83,8 @@ def main():
                     if a.get("link"):
                         links.append(f"{m['home']} vs {m['away']}\n{a['link']}")
         else:
+            if is_past(m["date"]):
+                continue
             skipped += 1
             status = "بدون بازار" if not ev else f"بازار هست/قیمت نه ({src})"
             if raw and len(dbg) < 2:
@@ -90,7 +100,7 @@ def main():
     rows.sort(reverse=True)
     top = "\n".join(r[1] for r in rows[:8]) or "—"
     extra = ("\n\n🔬 " + "\n".join(dbg)) if dbg else ""
-    C.send(f"📊 گزارش v23 | {getattr(C, 'VERSION', 'CORE-GHADIMI!')}\nبازی‌ها: {C.fa(len(fx))} | بدون بازار: {C.fa(skipped)}\n💰 Value: {C.fa(vb)} | ⚔️ نابرابر: {C.fa(mm)} | 👀 Watch: {C.fa(wl)}\n\nبرترین‌ها:\n{top}{extra}", html=False)
+    C.send(f"📊 گزارش v24 | {getattr(C, 'VERSION', 'CORE-GHADIMI!')}\nبازی‌ها: {C.fa(len(fx))} | بدون بازار: {C.fa(skipped)}\n💰 Value: {C.fa(vb)} | ⚔️ نابرابر: {C.fa(mm)} | 👀 Watch: {C.fa(wl)}\n\nبرترین‌ها:\n{top}{extra}", html=False)
     st["last_summary"] = now.strftime("%Y-%m-%d")
     C.save_state(st)
     print("done", vb, mm, wl)
