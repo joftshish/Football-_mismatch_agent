@@ -1,14 +1,15 @@
 import httpx, json, math, os, unicodedata
 from datetime import datetime, timedelta, timezone
 
-VERSION = "core15"
+VERSION = "core17"
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 ESPN = "https://site.api.espn.com/apis"
 POLY = "https://gamma-api.polymarket.com"
 TZ = timezone(timedelta(hours=3, minutes=30))
 FAD = "۰۱۲۳۴۵۶۷۸۹"
-SOCCER = {"eng.1": "🏴 لیگ برتر انگلیس", "esp.1": "🇪 لالیگا", "ger.1": "🇩🇪 بوندس‌لیگا", "ita.1": "🇮🇹 سری آ", "fra.1": "🇫 لیگ ۱", "por.1": "🇵🇹 پرتغال", "ksa.1": "🇸 عربستان", "eng.2": "🏴 Championship", "esp.2": "🇪 Segunda", "usa.1": "🇺 MLS", "bra.1": "🇧🇷 برزیل", "mex.1": "🇲 مکزیک", "ned.1": "🇳 هلند", "tur.1": "🇹 ترکیه", "jpn.1": "🇯 ژاپن", "ger.2": "🇩 بوندس‌لیگا۲", "ita.2": "🇮 سری B", "eng.3": "🏴 League One", "fra.2": "🇫 لیگ ۲", "arg.1": "🇦 آرژانتین"}
+SOCCER = {"eng.1": "🏴 لیگ برتر انگلیس", "esp.1": "🇪🇸 لالیگا", "ger.1": "🇩🇪 بوندس‌لیگا", "ita.1": "🇮🇹 سری آ", "fra.1": "🇫🇷 لیگ ۱", "por.1": "🇵🇹 پرتغال", "ksa.1": "🇸 عربستان", "eng.2": "🏴 Championship", "esp.2": "🇪🇸 Segunda", "usa.1": "🇺🇸 MLS", "bra.1": "🇧🇷 برزیل", "mex.1": "🇲🇽 مکزیک", "ned.1": "🇳🇱 هلند", "tur.1": "🇹🇷 ترکیه", "jpn.1": "🇯🇵 ژاپن", "ger.2": "🇩🇪 بوندس‌لیگا۲", "ita.2": "🇮🇹 سری B", "eng.3": "🏴 League One", "fra.2": "🇫🇷 لیگ ۲", "arg.1": "🇦🇷 آرژانتین"}
+VOLATILE = {"eng.2", "eng.3", "esp.2", "fra.2", "ita.2", "ger.2"}
 TENNIS = {"atp": "🎾 ATP", "wta": "🎾 WTA"}
 WD = ["شنبه", "یکشنبه", "دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه"]
 MO = ["فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور", "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"]
@@ -176,15 +177,15 @@ def tennis_probe():
     except Exception as ex:
         return f"err: {ex}"
 
-def soccer_power(rank, d, home):
-    base = 100 - int(rank) * 3
+def power_from(eff_rank, d, mult, fbw, gbw, gbc, home_b):
+    base = 100 - eff_rank * mult
     played = d.get("played", 0)
     if played > 0:
-        fb = (d.get("wins", 0) / played - 0.4) * 15
-        gb = max(-10, min(10, ((d.get("gf", 0) - d.get("ga", 0)) / played) * 5))
+        fb = (d.get("wins", 0) / played - 0.4) * fbw
+        gb = max(-gbc, min(gbc, ((d.get("gf", 0) - d.get("ga", 0)) / played) * gbw))
     else:
         fb = gb = 0
-    return max(0, min(100, base + fb + gb + (8 if home else 0)))
+    return max(0, min(100, base + fb + gb + home_b))
 
 def tennis_power(rank):
     return 100 - 30 * math.log10(max(int(rank), 1) + 1)
@@ -315,25 +316,51 @@ def compute(m, cur, last, tr):
     solid = False
     rsrc = "cur"
     hr = ar = None
+    hcr = hlr = acr = alr = None
     if m["sport"] == "soccer":
         t = cur.get(m["slug"], {})
         hd, ad = t.get(m["home"], {}), t.get(m["away"], {})
-        h_cur = hd.get("played", 0) >= 5
-        a_cur = ad.get("played", 0) >= 5
+        lh = last.get(m["slug"], {}).get(m["home"], {})
+        la = last.get(m["slug"], {}).get(m["away"], {})
+        h_played = hd.get("played", 0)
+        a_played = ad.get("played", 0)
+        h_cur = h_played >= 5
+        a_cur = a_played >= 5
         if h_cur != a_cur:
             return None
-        if h_cur:
-            solid = hd.get("played", 0) >= 8 and ad.get("played", 0) >= 8
-            hr = hd.get("rank", DEFAULT_RANK)
-            ar = ad.get("rank", DEFAULT_RANK)
+        hcr = hd.get("rank") if h_cur else None
+        acr = ad.get("rank") if a_cur else None
+        hlr = lh.get("rank")
+        alr = la.get("rank")
+        def eff(cr, lr, played):
+            if cr is None and lr is None:
+                return float(DEFAULT_RANK)
+            if cr is None:
+                return float(lr)
+            if lr is None:
+                return float(cr)
+            w = min(1.0, played / 12.0)
+            return cr * w + lr * (1 - w)
+        ehr = eff(hcr, hlr, h_played)
+        ear = eff(acr, alr, a_played)
+        early = min(h_played, a_played) < 8
+        soft = early or m["slug"] in VOLATILE
+        mult = 2 if soft else 3
+        fbw = 25 if soft else 15
+        gbw = 8 if soft else 5
+        gbc = 15 if soft else 10
+        home_b = 6 if soft else 8
+        hp = power_from(ehr, hd, mult, fbw, gbw, gbc, home_b)
+        ap = power_from(ear, ad, mult, fbw, gbw, gbc, 0)
+        hr = int(round(ehr))
+        ar = int(round(ear))
+        if h_cur and hlr:
+            rsrc = "blend"
+        elif h_cur:
+            rsrc = "cur"
         else:
             rsrc = "last"
-            lh = last.get(m["slug"], {}).get(m["home"], {})
-            la = last.get(m["slug"], {}).get(m["away"], {})
-            solid = lh.get("played", 0) >= 20 and la.get("played", 0) >= 20
-            hr = lh.get("rank", DEFAULT_RANK)
-            ar = la.get("rank", DEFAULT_RANK)
-        hp, ap = soccer_power(hr, hd, True), soccer_power(ar, ad, False)
+        solid = (h_cur and a_cur and h_played >= 8 and a_played >= 8) or ((not h_cur) and (not a_cur) and lh.get("played", 0) >= 20 and la.get("played", 0) >= 20)
         low = not (h_cur and a_cur)
     else:
         hr = tr.get(m["slug"], {}).get(m["home"].lower().split()[-1])
@@ -349,7 +376,10 @@ def compute(m, cur, last, tr):
     if gap < thr:
         return None
     sh = hp > ap
-    return {"gap": gap, "thr": thr, "stronger": m["home"] if sh else m["away"], "sh": sh, "prob": model_prob(gap), "low": low, "solid": solid, "hr": hr, "ar": ar, "rsrc": rsrc}
+    prob = model_prob(gap)
+    if m["sport"] == "soccer" and min(hd.get("played", 0), ad.get("played", 0)) < 8:
+        prob = min(prob, 0.80)
+    return {"gap": gap, "thr": thr, "stronger": m["home"] if sh else m["away"], "sh": sh, "prob": prob, "low": low, "solid": solid, "hr": hr, "ar": ar, "rsrc": rsrc, "hcr": hcr, "hlr": hlr, "acr": acr, "alr": alr}
 
 def load_state():
     if os.path.exists("state.json"):
@@ -367,6 +397,16 @@ def save_state(s):
     s["last_links"] = s.get("last_links", [])[-10:]
     json.dump(s, open("state.json", "w"))
 
+def rank_line(a):
+    def rr(x):
+        return fa(x) if x else "—"
+    if a.get("hcr") is not None or a.get("hlr") is not None:
+        return f"\n🏅 رتبه (جاری/قبل): {a['home']} {rr(a.get('hcr'))}/{rr(a.get('hlr'))} | {a['away']} {rr(a.get('acr'))}/{rr(a.get('alr'))}"
+    if a.get("hr") is not None:
+        src = {"cur": "فصل جاری", "last": "فصل قبل", "rank": "رنکینگ جهانی", "blend": "ترکیب جاری و قبل"}.get(a.get("rsrc"), "")
+        return f"\n🏅 رتبه: {a['home']} → {fa(a['hr'])} | {a['away']} → {fa(a['ar'])} ({src})"
+    return ""
+
 def notify(emoji, a):
     try:
         dt = datetime.fromisoformat(a["date"].replace("Z", "+00:00")).astimezone(TZ)
@@ -374,9 +414,7 @@ def notify(emoji, a):
     except Exception:
         jd, tm = a["date"], ""
     t = f"{emoji} <b>{a['title']}</b>\n\n🏆 {a['league']}\n📅 {jd} — ساعت {tm}\n\n{a['icon']} <b>{a['home']}</b> vs <b>{a['away']}</b>"
-    if a.get("hr") is not None:
-        src = {"cur": "فصل جاری", "last": "فصل قبل", "rank": "رنکینگ جهانی"}.get(a.get("rsrc"), "")
-        t += f"\n🏅 رتبه: {a['home']} → {fa(a['hr'])} | {a['away']} → {fa(a['ar'])} ({src})"
+    t += rank_line(a)
     t += f"\n\n📊 مدل ما: {fa(round(a['prob']*100))}٪ برد {a['stronger']}\n💰 بازار Polymarket: {fa(round(a['price']*100))}٪\n📈 لبه: {fa(round(a['edge']*100,1))}٪"
     if a.get("kelly"):
         t += f"\n💵 پیشنهاد Kelly: {fa(round(a['kelly']*100,1))}٪ سرمایه"
@@ -395,8 +433,6 @@ def notify_watch(m, c):
         jd, tm = m["date"], ""
     icon = "🎾" if m["sport"] == "tennis" else "⚽"
     t = f"👀 <b>بازی نابرابر — منتظر بازار Polymarket</b>\n\n🏆 {m['league']}\n📅 {jd} — ساعت {tm}\n\n{icon} <b>{m['home']}</b> vs <b>{m['away']}</b>"
-    if c.get("hr") is not None:
-        src = {"cur": "فصل جاری", "last": "فصل قبل", "rank": "رنکینگ جهانی"}.get(c.get("rsrc"), "")
-        t += f"\n🏅 رتبه: {m['home']} → {fa(c['hr'])} | {m['away']} → {fa(c['ar'])} ({src})"
+    t += rank_line({"home": m["home"], "away": m["away"], "hcr": c.get("hcr"), "hlr": c.get("hlr"), "acr": c.get("acr"), "alr": c.get("alr"), "hr": c.get("hr"), "ar": c.get("ar"), "rsrc": c.get("rsrc")})
     t += f"\n\n📊 مدل: {fa(round(c['prob']*100))}٪ برد {c['stronger']}\n💰 بازار: هنوز باز نشده\n\n⏰ Fast Scan هر ۵ دقیقه چک می‌کنه؛ به محض باز شدن، نوتیف ⚡ با لینک مستقیم می‌گیری"
     return send(t)
