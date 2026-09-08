@@ -10,9 +10,10 @@ def is_past(ds, grace=1.0):
         return False
 
 def main():
-    print("=== v24 ===")
+    print("=== v25 ===")
     st = C.load_state()
     prefs = st.get("prefs", {})
+    cal = st.get("calib", 1.0)
     force = prefs.get("force", False)
     if force:
         noted, known, watch_noted = [], [], []
@@ -23,6 +24,7 @@ def main():
         watch_noted = st.setdefault("watch_noted", [])
     watch = st.setdefault("watchlist", [])
     watch[:] = [w for w in watch if not is_past(w.get("date", ""))]
+    preds = st.setdefault("preds", [])
     links = st.setdefault("last_links", [])
     off_l = set(prefs.get("off", []))
     only_v = prefs.get("only_value", False)
@@ -43,6 +45,7 @@ def main():
         c = C.compute(m, cur, last, tr)
         if not c:
             continue
+        c["prob"] = 0.5 + (c["prob"] - 0.5) * cal
         ev = C.find_poly(pev, m["home"], m["away"], m["sport"], m["date"])
         src = "list"
         raw = ""
@@ -80,6 +83,7 @@ def main():
                         mm += 1
                     noted.append(m["id"])
                     known.append(eid)
+                    preds.append({"home": m["home"], "away": m["away"], "sport": m["sport"], "slug": m["slug"], "date": m["date"], "prob": round(c["prob"], 3), "price": round(price, 3), "stronger": c["stronger"], "link": a.get("link"), "status": "open"})
                     if a.get("link"):
                         links.append(f"{m['home']} vs {m['away']}\n{a['link']}")
         else:
@@ -96,11 +100,12 @@ def main():
                     watch_noted.append(key)
                     watch.append({"home": m["home"], "away": m["away"], "sport": m["sport"], "slug": m["slug"], "date": m["date"], "league": m["league"]})
                     wl += 1
+    st["preds"] = preds[-300:]
     st["last_links"] = links[-10:]
     rows.sort(reverse=True)
     top = "\n".join(r[1] for r in rows[:8]) or "—"
     extra = ("\n\n🔬 " + "\n".join(dbg)) if dbg else ""
-    C.send(f"📊 گزارش v24 | {getattr(C, 'VERSION', 'CORE-GHADIMI!')}\nبازی‌ها: {C.fa(len(fx))} | بدون بازار: {C.fa(skipped)}\n💰 Value: {C.fa(vb)} | ⚔️ نابرابر: {C.fa(mm)} | 👀 Watch: {C.fa(wl)}\n\nبرترین‌ها:\n{top}{extra}", html=False)
+    C.send(f"📊 گزارش v25 | {getattr(C, 'VERSION', 'CORE-GHADIMI!')}\nبازی‌ها: {C.fa(len(fx))} | بدون بازار: {C.fa(skipped)}\n💰 Value: {C.fa(vb)} | ⚔️ نابرابر: {C.fa(mm)} | 👀 Watch: {C.fa(wl)}\n\nبرترین‌ها:\n{top}{extra}", html=False)
     st["last_summary"] = now.strftime("%Y-%m-%d")
     C.save_state(st)
     print("done", vb, mm, wl)
