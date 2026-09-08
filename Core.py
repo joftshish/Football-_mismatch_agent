@@ -1,14 +1,14 @@
 import httpx, json, math, os, unicodedata
 from datetime import datetime, timedelta, timezone
 
-VERSION = "core18"
+VERSION = "core19"
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 ESPN = "https://site.api.espn.com/apis"
 POLY = "https://gamma-api.polymarket.com"
 TZ = timezone(timedelta(hours=3, minutes=30))
 FAD = "۰۱۳۴۵۷۸۹"
-SOCCER = {"eng.1": "🏴 لیگ برتر انگلیس", "esp.1": "🇪🇸 لالیگا", "ger.1": "🇩🇪 بوندس‌لیگا", "ita.1": "🇮🇹 سری آ", "fra.1": "🇫🇷 لیگ ۱", "por.1": "🇵🇹 پرتغال", "ksa.1": "🇸 عربستان", "eng.2": "🏴 Championship", "esp.2": "🇪🇸 Segunda", "usa.1": "🇺🇸 MLS", "bra.1": "🇧🇷 برزیل", "mex.1": "🇲 مکزیک", "ned.1": "🇳 هلند", "tur.1": "🇹🇷 ترکیه", "jpn.1": "🇯🇵 ژاپن", "ger.2": "🇩🇪 بوندس‌لیگا۲", "ita.2": "🇮 سری B", "eng.3": "🏴 League One", "fra.2": "🇫🇷 لیگ ۲", "arg.1": "🇦 آرژانتین"}
+SOCCER = {"eng.1": "🏴 لیگ برتر انگلیس", "esp.1": "🇪🇸 لالیگا", "ger.1": "🇩 بوندس‌لیگا", "ita.1": "🇮🇹 سری آ", "fra.1": "🇫🇷 لیگ ۱", "por.1": "🇵 پرتغال", "ksa.1": "🇸 عربستان", "eng.2": "🏴 Championship", "esp.2": "🇪🇸 Segunda", "usa.1": "🇺🇸 MLS", "bra.1": "🇧🇷 برزیل", "mex.1": "🇲🇽 مکزیک", "ned.1": "🇳 هلند", "tur.1": "🇹🇷 ترکیه", "jpn.1": "🇯🇵 ژاپن", "ger.2": "🇩🇪 بوندس‌لیگا۲", "ita.2": "🇮 سری B", "eng.3": "🏴 League One", "fra.2": "🇫🇷 لیگ ۲", "arg.1": "🇦🇷 آرژانتین"}
 VOLATILE = {"eng.2", "eng.3", "esp.2", "fra.2", "ita.2", "ger.2"}
 TENNIS = {"atp": "🎾 ATP", "wta": "🎾 WTA"}
 WD = ["شنبه", "یکشنبه", "دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه"]
@@ -34,7 +34,17 @@ def jalali(dt):
     except Exception:
         return dt.strftime("%Y-%m-%d"), dt.strftime("%H:%M")
 
-def model_prob(gap):
+def model_prob(gap, soft=False):
+    if soft:
+        if gap >= 55:
+            return 0.85
+        if gap >= 45:
+            return 0.80
+        if gap >= 35:
+            return 0.75
+        if gap >= 25:
+            return 0.68
+        return 0.60
     if gap >= 55:
         return 0.92
     if gap >= 45:
@@ -177,16 +187,6 @@ def tennis_probe():
         return "raw=" + json.dumps(evs[0], ensure_ascii=False)[:250]
     except Exception as ex:
         return f"err: {ex}"
-
-def power_from(eff_rank, d, mult, fbw, gbw, gbc, home_b):
-    base = 100 - eff_rank * mult
-    played = d.get("played", 0)
-    if played > 0:
-        fb = (d.get("wins", 0) / played - 0.4) * fbw
-        gb = max(-gbc, min(gbc, ((d.get("gf", 0) - d.get("ga", 0)) / played) * gbw))
-    else:
-        fb = gb = 0
-    return max(0, min(100, base + fb + gb + home_b))
 
 def boost_of(d, eff_rank):
     played = d.get("played", 0)
@@ -337,6 +337,7 @@ def compute(m, cur, last, tr):
     hr = ar = None
     hcr = hlr = acr = alr = None
     bh = ba = None
+    detail = None
     if m["sport"] == "soccer":
         t = cur.get(m["slug"], {})
         hd, ad = t.get(m["home"], {}), t.get(m["away"], {})
@@ -373,8 +374,20 @@ def compute(m, cur, last, tr):
         gbw = 8 if soft else 5
         gbc = 15 if soft else 10
         home_b = 6 if soft else 8
-        hp = power_from(ehr, hd, mult, fbw, gbw, gbc, home_b)
-        ap = power_from(ear, ad, mult, fbw, gbw, gbc, 0)
+        def comps(eff_rank, d):
+            base = 100 - eff_rank * mult
+            played = d.get("played", 0)
+            if played:
+                fb = (d.get("wins", 0) / played - 0.4) * fbw
+                gb = max(-gbc, min(gbc, ((d.get("gf", 0) - d.get("ga", 0)) / played) * gbw))
+            else:
+                fb = gb = 0
+            return base, fb, gb
+        base_h, fb_h, gb_h = comps(ehr, hd)
+        base_a, fb_a, gb_a = comps(ear, ad)
+        hp = max(0, min(100, base_h + fb_h + gb_h + home_b))
+        ap = max(0, min(100, base_a + fb_a + gb_a))
+        detail = {"mult": mult, "fbw": fbw, "gbw": gbw, "gbc": gbc, "early": early, "soft": soft, "h": {"cr": hcr, "lr": hlr, "eff": round(ehr, 1), "base": round(base_h, 1), "fb": round(fb_h, 1), "gb": round(gb_h, 1), "home": home_b, "power": round(hp, 1), "boost": bh}, "a": {"cr": acr, "lr": alr, "eff": round(ear, 1), "base": round(base_a, 1), "fb": round(fb_a, 1), "gb": round(gb_a, 1), "home": 0, "power": round(ap, 1), "boost": ba}}
         hr = int(round(ehr))
         ar = int(round(ear))
         if h_cur and hlr:
@@ -399,10 +412,11 @@ def compute(m, cur, last, tr):
     if gap < thr:
         return None
     sh = hp > ap
-    prob = model_prob(gap)
+    soft = bool(detail and detail.get("soft")) if detail else False
+    prob = model_prob(gap, soft)
     if m["sport"] == "soccer" and min(hd.get("played", 0), ad.get("played", 0)) < 8:
         prob = min(prob, 0.80)
-    return {"gap": gap, "thr": thr, "stronger": m["home"] if sh else m["away"], "sh": sh, "prob": prob, "low": low, "solid": solid, "hr": hr, "ar": ar, "rsrc": rsrc, "hcr": hcr, "hlr": hlr, "acr": acr, "alr": alr, "bh": bh, "ba": ba}
+    return {"gap": gap, "thr": thr, "stronger": m["home"] if sh else m["away"], "sh": sh, "prob": prob, "low": low, "solid": solid, "hr": hr, "ar": ar, "rsrc": rsrc, "hcr": hcr, "hlr": hlr, "acr": acr, "alr": alr, "bh": bh, "ba": ba, "detail": detail}
 
 def load_state():
     if os.path.exists("state.json"):
