@@ -1,6 +1,6 @@
 import Core as C
 import httpx, time, traceback
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 def api(method, **kw):
     try:
@@ -17,9 +17,9 @@ def send_safe(text):
         ok = C.send(text, html=False)
     return ok
 
-MENU = {"inline_keyboard": [[{"text": "📊 وضعیت", "callback_data": "وضعیت"}, {"text": "🏟 لیگ‌ها", "callback_data": "لیگ‌ها"}], [{"text": "🔁 تکرار", "callback_data": "تکرار"}, {"text": "🔗 لینک‌ها", "callback_data": "لینک‌ها"}], [{"text": "💰 فقط ارزش", "callback_data": "فقط ارزش"}, {"text": "📢 همه", "callback_data": "همه"}], [{"text": "📈 گزارش بت", "callback_data": "گزارش"}, {"text": "❓ راهنما", "callback_data": "راهنما"}]]}
+MENU = {"inline_keyboard": [[{"text": "📊 وضعیت", "callback_data": "وضعیت"}, {"text": "🏟 لیگ‌ها", "callback_data": "لیگ‌ها"}], [{"text": "🔁 تکرار", "callback_data": "تکرار"}, {"text": "🔗 لینک‌ها", "callback_data": "لینک‌ها"}], [{"text": "🧪 کارنامه", "callback_data": "کارنامه"}, {"text": "📈 گزارش بت", "callback_data": "گزارش"}], [{"text": "❓ راهنما", "callback_data": "راهنما"}]]}
 
-HELP = "🤖 دستورات:\nراهنما/منو → منوی دکمه‌ای\nوضعیت → تنظیمات\nلیگ‌ها → فهرست لیگ‌ها\nخاموش <لیگ> / روشن <لیگ>\nلبه <عدد> → حداقل لبه درصد\nفقط ارزش / همه\nلینک‌ها → لینک‌های اخیر\nتکرار → فراخوانی دوباره نوتیف‌ها\nبت <تیم> <قیمت> <درصد>\nگزارش → آمار بت‌ها"
+HELP = "🤖 دستورات:\nراهنما/منو → منوی دکمه‌ای\nوضعیت → تنظیمات\nلیگ‌ها → فهرست لیگ‌ها\nخاموش <لیگ> / روشن <لیگ>\nلبه <عدد> → حداقل لبه درصد\nفقط ارزش / همه\nلینک‌ها → لینک‌های اخیر\nتکرار → فراخوانی دوباره نوتیف‌ها\nکارنامه → دقت مدل (خودآزمایی)\nبت <تیم> <قیمت> <درصد>\nگزارش → آمار بت‌ها"
 
 def send_menu():
     api("sendMessage", chat_id=C.CHAT_ID, text="🎛️ منوی ایجنت — یه گزینه رو بزن:", reply_markup=MENU)
@@ -84,6 +84,33 @@ def result_of(b):
         print("res err", ex)
     return None
 
+def pred_result(p):
+    d = p["date"][:10].replace("-", "")
+    try:
+        r = httpx.get(f"{C.EPSN}/site/v2/sports/{p['sport']}/{p['slug']}/scoreboard", params={"dates": d}, timeout=15).json()
+        for ev in r.get("events", []):
+            cs = ev.get("competitions", [{}])[0].get("competitors", [])
+            names = [C.norm((c.get("athlete") or c.get("team") or {}).get("displayName") or "") for c in cs]
+            if C.norm(p["home"]) not in names or C.norm(p["away"]) not in names:
+                continue
+            if ev.get("status", {}).get("type", {}).get("state") != "post":
+                return None
+            if p["sport"] == "tennis":
+                for i in range(2):
+                    if "winner" in cs[i]:
+                        return names[i] if cs[i]["winner"] else names[1 - i]
+                return None
+            try:
+                s0, s1 = float(cs[0].get("score", -1)), float(cs[1].get("score", -1))
+            except Exception:
+                return None
+            if s0 == s1:
+                return "draw"
+            return names[0] if s0 > s1 else names[1]
+    except Exception as ex:
+        print("pred err", ex)
+    return None
+
 def report(st):
     bets = st.get("bets", [])
     w = sum(1 for b in bets if b["status"] == "win")
@@ -94,6 +121,24 @@ def report(st):
     wr = round(w / (w + l) * 100) if w + l else 0
     return f"📊 گزارش بت‌ها\n💳 بانک: {round(bank,1)} (شروع 100)\n📈 سود/ضرر: {round(roi,1)}%\n✅ برد: {w} | ❌ باخت: {l} | ⏳ باز: {o}\n🎯 نرخ برد: {wr}%"
 
+def karnameh(st):
+    settled = [p for p in st.get("preds", []) if p.get("status") == "settled"]
+    if not settled:
+        return "🧪 هنوز پیش‌بینی تسویه‌شده‌ای نداریم؛ چند روز صبر کن"
+    buckets = {}
+    for p in settled:
+        b = int(p["prob"] * 10) * 10
+        buckets.setdefault(b, []).append(p)
+    lines = [f"🧪 کارنامه مدل ({C.fa(len(settled))} پیش‌بینی تسویه‌شده)"]
+    for b in sorted(buckets):
+        ps = buckets[b]
+        act = sum(x["o"] for x in ps) / len(ps)
+        lines.append(f"  مدل {C.fa(b)}-{C.fa(b+9)}٪ → واقعیت {C.fa(round(act*100))}٪ ({C.fa(len(ps))} بازی)")
+    brier = sum((p["prob"] - p["o"]) ** 2 for p in settled) / len(settled)
+    lines.append(f"📐 Brier: {C.fa(round(brier,3))} (کمتر = صادق‌تر)")
+    lines.append(f"🔧 ضریب خوداصلاحی: {C.fa(round(st.get('calib',1.0),2))}")
+    return "\n".join(lines)
+
 def handle(text, st, prefs):
     t = text.strip()
     if t in ("راهنما", "/start", "help", "منو"):
@@ -101,7 +146,7 @@ def handle(text, st, prefs):
         return HELP
     if t == "وضعیت":
         ov = "فقط ارزش 💰" if prefs.get("only_value") else "همه 📢"
-        return f"⚙️ وضعیت:\nحداقل لبه: {round(prefs.get('min_edge', 0.03)*100)}%\nحالت: {ov}\nلیگ‌های خاموش: {', '.join(prefs.get('off', [])) or 'هیچ'}"
+        return f"⚙️ وضعیت:\nحداقل لبه: {round(prefs.get('min_edge', 0.03)*100)}%\nحالت: {ov}\nضریب کالیبراسیون: {round(st.get('calib',1.0),2)}\nلیگ‌های خاموش: {', '.join(prefs.get('off', [])) or 'هیچ'}"
     if t == "لیگ‌ها":
         lines = [("❌ " if n in prefs.get("off", []) else "✅ ") + n for n in list(C.SOCCER.values()) + list(C.TENNIS.values())]
         return "\n".join(lines)
@@ -137,6 +182,8 @@ def handle(text, st, prefs):
     if t == "لینک‌ها":
         ls = st.get("last_links", [])
         return "\n\n".join(ls[-5:]) if ls else "لینکی ثبت نشده"
+    if t == "کارنامه":
+        return karnameh(st)
     if t.startswith("بت") or t.startswith("/bet"):
         pb = parse_bet(t)
         if not pb:
@@ -175,13 +222,44 @@ def main():
         ok = send_safe(reply)
         print("reply sent:", ok)
     st["tg_offset"] = off
+    now = datetime.now(timezone.utc)
+    preds = st.setdefault("preds", [])
+    for p in preds:
+        if p.get("status") != "open":
+            continue
+        try:
+            start = datetime.fromisoformat(p["date"].replace("Z", "+00:00"))
+        except Exception:
+            p["status"] = "expired"
+            continue
+        for thr in (3, 1):
+            key = f"rem{thr}"
+            if not p.get(key) and p.get("link") and now < start and (start - now).total_seconds() <= thr * 3600:
+                mins = int((start - now).total_seconds() // 60)
+                send_safe(f"⏰ یادآور بت\n⚽ {p['home']} vs {p['away']}\n⏳ تا شروع: {C.fa(mins//60)} ساعت و {C.fa(mins%60)} دقیقه\n📊 مدل: {C.fa(round(p['prob']*100))}٪ برد {p['stronger']} | بازار: {C.fa(round(p['price']*100))}٪\n📋 لینک:\n{p['link']}")
+                p[key] = True
+        if now < start + timedelta(hours=2):
+            continue
+        w = pred_result(p)
+        if w is None:
+            continue
+        p["status"] = "settled"
+        p["o"] = 1 if (w != "draw" and C.norm(w) == C.norm(p["stronger"])) else 0
+    settled = [p for p in preds if p.get("status") == "settled"]
+    if len(settled) >= 20:
+        mp = sum(p["prob"] for p in settled) / len(settled)
+        mo = sum(p["o"] for p in settled) / len(settled)
+        if mp > 0.55:
+            s = max(0.5, min(1.1, (mo - 0.5) / (mp - 0.5)))
+            old = st.get("calib", 1.0)
+            st["calib"] = round(max(0.5, min(1.1, 0.6 * old + 0.4 * s)), 3)
     bets = st.get("bets", [])
     bank = st.setdefault("bank", 100.0)
     for b in bets:
         if b["status"] != "open":
             continue
         try:
-            if datetime.fromisoformat(b["date"].replace("Z", "+00:00")) > datetime.now(timezone.utc):
+            if datetime.fromisoformat(b["date"].replace("Z", "+00:00")) > now:
                 continue
         except Exception:
             continue
@@ -203,6 +281,7 @@ def main():
             send_safe(f"↩️ مساوی — برگشت سرمایه: {b['team']}")
     st["bank"] = bank
     st["bets"] = bets[-200:]
+    st["preds"] = preds[-300:]
     C.save_state(st)
     print("bot done")
 
