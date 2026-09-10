@@ -450,24 +450,43 @@ def boost_line(a):
         return ""
     return f"\n⚡ بوست فرم: {a['home']} {boost_tag(bh)} | {a['away']} {boost_tag(ba)}"
 
+def rank_of(cr, lr):
+    def rr(x):
+        return fa(x) if x else "—"
+    return f"جاری {rr(cr)}، قبل {rr(lr)}"
+
+def btag(b):
+    if b is None:
+        return "—"
+    if b >= 0.5:
+        return f"🚀 {fa(round(b,2))} بالاتر از انتظار"
+    if b <= -0.5:
+        return f"📉 {fa(round(abs(b),2))} پایین‌تر از انتظار"
+    return f"➖ {fa(round(abs(b),2))} نزدیک انتظار"
+
 def notify(emoji, a):
     try:
         dt = datetime.fromisoformat(a["date"].replace("Z", "+00:00")).astimezone(TZ)
         jd, tm = jalali(dt)
     except Exception:
         jd, tm = a["date"], ""
-    t = f"{emoji} <b>{a['title']}</b>\n\n🏆 {a['league']}\n📅 {jd} — ساعت {tm}\n\n{a['icon']} <b>{a['home']}</b> vs <b>{a['away']}</b>"
-    t += rank_line(a)
-    t += boost_line(a)
-    t += f"\n\n📊 مدل ما: {fa(round(a['prob']*100))}٪ برد {a['stronger']}\n💰 بازار Polymarket: {fa(round(a['price']*100))}٪\n📈 لبه: {fa(round(a['edge']*100,1))}٪"
+    L = [f"{emoji} <b>{a['title']}</b>", "", f"🏆 لیگ: {a['league']}", f"📅 {jd} — ساعت {tm}", "", f"⚽ {a['home']}", f"🆚 {a['away']}"]
+    if a.get("hcr") is not None or a.get("hlr") is not None:
+        L += ["", "🏅 رتبه‌ها:", f"   {a['home']}: {rank_of(a.get('hcr'), a.get('hlr'))}", f"   {a['away']}: {rank_of(a.get('acr'), a.get('alr'))}"]
+    elif a.get("hr") is not None:
+        src = {"cur": "فصل جاری", "last": "فصل قبل", "rank": "رنکینگ جهانی", "blend": "ترکیب جاری و قبل"}.get(a.get("rsrc"), "")
+        L += ["", "🏅 رتبه‌ها:", f"   {a['home']}: {fa(a['hr'])} ({src})", f"   {a['away']}: {fa(a['ar'])} ({src})"]
+    if a.get("bh") is not None or a.get("ba") is not None:
+        L += ["", "⚡ فرم نسبت به انتظار:", f"   {a['home']}: {btag(a.get('bh'))}", f"   {a['away']}: {btag(a.get('ba'))}"]
+    L += ["", f"📊 نظر مدل: {fa(round(a['prob']*100))}٪ برد {a['stronger']}", f"💰 نظر بازار: {fa(round(a['price']*100))}٪ برد {a['stronger']}", f"📈 لبه: {fa(round(a['edge']*100,1))}٪"]
     if a.get("kelly"):
-        t += f"\n💵 پیشنهاد Kelly: {fa(round(a['kelly']*100,1))}٪ سرمایه"
-    t += f"\n📋 {a['label']}"
+        L.append(f"💵 پیشنهاد Kelly: {fa(round(a['kelly']*100,1))}٪ سرمایه")
+    L += ["", f"📋 {a['label']}"]
     if a.get("note"):
-        t += f"\n{a['note']}"
+        L.append(a["note"])
     if a.get("link"):
-        t += f"\n\n📋 لینک بت (کپی کن):\n{a['link']}"
-    return send(t)
+        L += ["", "🔗 لینک بت:", a["link"]]
+    return send("\n".join(L))
 
 def notify_watch(m, c):
     try:
@@ -476,8 +495,10 @@ def notify_watch(m, c):
     except Exception:
         jd, tm = m["date"], ""
     icon = "🎾" if m["sport"] == "tennis" else "⚽"
-    t = f"👀 <b>بازی نابرابر — منتظر بازار Polymarket</b>\n\n🏆 {m['league']}\n📅 {jd} — ساعت {tm}\n\n{icon} <b>{m['home']}</b> vs <b>{m['away']}</b>"
-    t += rank_line({"home": m["home"], "away": m["away"], "hcr": c.get("hcr"), "hlr": c.get("hlr"), "acr": c.get("acr"), "alr": c.get("alr"), "hr": c.get("hr"), "ar": c.get("ar"), "rsrc": c.get("rsrc")})
-    t += boost_line({"home": m["home"], "away": m["away"], "bh": c.get("bh"), "ba": c.get("ba")})
-    t += f"\n\n📊 مدل: {fa(round(c['prob']*100))}٪ برد {c['stronger']}\n💰 بازار: هنوز باز نشده\n\n⏰ Fast Scan هر ۵ دقیقه چک می‌کنه؛ به محض باز شدن، نوتیف ⚡ با لینک مستقیم می‌گیری"
-    return send(t)
+    L = ["👀 <b>بازی نابرابر — منتظر بازار Polymarket</b>", "", f"🏆 لیگ: {m['league']}", f"📅 {jd} — ساعت {tm}", "", f"{icon} {m['home']}", f"🆚 {m['away']}"]
+    if c.get("hcr") is not None or c.get("hlr") is not None:
+        L += ["", "🏅 رتبه‌ها:", f"   {m['home']}: {rank_of(c.get('hcr'), c.get('hlr'))}", f"   {m['away']}: {rank_of(c.get('acr'), c.get('alr'))}"]
+    if c.get("bh") is not None or c.get("ba") is not None:
+        L += ["", "⚡ فرم نسبت به انتظار:", f"   {m['home']}: {btag(c.get('bh'))}", f"   {m['away']}: {btag(c.get('ba'))}"]
+    L += ["", f"📊 نظر مدل: {fa(round(c['prob']*100))}٪ برد {c['stronger']}", "💰 بازار: هنوز باز نشده", "", "⏰ Fast Scan هر ۵ دقیقه چک می‌کنه؛ به محض باز شدن، نوتیف ⚡ با لینک می‌گیری"]
+    return send("\n".join(L))
