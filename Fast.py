@@ -92,7 +92,7 @@ def main():
             edge = c["prob"] - price
             kl = C.kelly(c["prob"], price)
             is_value = c["solid"] and edge >= min_e and edge <= C.MAX_EDGE and kl > 0
-            a = {"title": "بازار باز شد + VALUE BET 💰⚡" if is_value else "بازار Polymarket باز شد ⚡", "league": w["league"], "date": w["date"], "home": w["home"], "away": w["away"], "stronger": c["stronger"], "prob": c["prob"], "price": price, "edge": edge, "kelly": kl if is_value else 0, "label": "به‌وضوح نابرابر 🟠", "icon": "🎾" if w["sport"] == "tennis" else "⚽", "link": C.poly_link(ev), "note": None if is_value else f"❌ لبه کم ({C.fa(round(edge*100,1))}٪) — فقط برای اطلاع", "hcr": c.get("hcr"), "hlr": c.get("hlr"), "acr": c.get("acr"), "alr": c.get("alr"), "bh": c.get("bh"), "ba": c.get("ba")}
+            a = {"title": "بازار باز شد + VALUE BET 💰⚡" if is_value else "بازار Polymarket باز شد ⚡", "league": w["league"], "date": w["date"], "home": w["home"], "away": w["away"], "stronger": c["stronger"], "prob": c["prob"], "price": price, "edge": edge, "kelly": kl if is_value else 0, "label": "به‌وضوح نابرابر 🟠", "icon": "🎾" if w["sport"] == "tennis" else "⚽", "link": C.poly_link(ev),"note": None if is_value else ("⚠️ لبه مشکوک (زیاد) — با احتیاط!" if edge > C.MAX_EDGE else ("⚠️ اوایل فصل/داده کم — فقط اطلاع" if not c["solid"] else f"❌ لبه کم ({C.fa(round(edge*100,1))}٪) — فقط برای اطلاع")), , "hcr": c.get("hcr"), "hlr": c.get("hlr"), "acr": c.get("acr"), "alr": c.get("alr"), "bh": c.get("bh"), "ba": c.get("ba")}
             if only_v and not is_value:
                 known.append(str(ev.get("id")))
                 continue
