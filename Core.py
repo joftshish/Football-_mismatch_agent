@@ -1,15 +1,16 @@
 import httpx, json, math, os, unicodedata
 from datetime import datetime, timedelta, timezone
 
-VERSION = "core19"
+VERSION = "core21"
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 ESPN = "https://site.api.espn.com/apis"
 POLY = "https://gamma-api.polymarket.com"
 TZ = timezone(timedelta(hours=3, minutes=30))
 FAD = "".join(chr(1632 + i) for i in range(10))
-SOCCER = {"eng.1": "🏴 لیگ برتر انگلیس", "esp.1": "🇪🇸 لالیگا", "ger.1": "🇩 بوندس‌لیگا", "ita.1": "🇮🇹 سری آ", "fra.1": "🇫🇷 لیگ ۱", "por.1": "🇵 پرتغال", "ksa.1": "🇸 عربستان", "eng.2": "🏴 Championship", "esp.2": "🇪🇸 Segunda", "usa.1": "🇺🇸 MLS", "bra.1": "🇧🇷 برزیل", "mex.1": "🇲🇽 مکزیک", "ned.1": "🇳 هلند", "tur.1": "🇹🇷 ترکیه", "jpn.1": "🇯🇵 ژاپن", "ger.2": "🇩🇪 بوندس‌لیگا۲", "ita.2": "🇮 سری B", "eng.3": "🏴 League One", "fra.2": "🇫🇷 لیگ ۲", "arg.1": "🇦🇷 آرژانتین"}
+SOCCER = {"eng.1": "🏴 لیگ برتر انگلیس", "esp.1": "🇪🇸 لالیگا", "ger.1": "🇩🇪 بوندس‌لیگا", "ita.1": "🇮🇹 سری آ", "fra.1": "🇫🇷 لیگ ۱", "por.1": "🇵 پرتغال", "ksa.1": "🇸🇦 عربستان", "eng.2": "🏴 Championship", "esp.2": "🇪🇸 Segunda", "usa.1": "🇺🇸 MLS", "bra.1": "🇧 برزیل", "mex.1": "🇲🇽 مکزیک", "ned.1": "🇳🇱 هلند", "tur.1": "🇹🇷 ترکیه", "jpn.1": "🇯🇵 ژاپن", "ger.2": "🇩🇪 بوندس‌لیگا۲", "ita.2": "🇮🇹 سری B", "eng.3": "🏴 League One", "fra.2": "🇫🇷 لیگ ۲", "arg.1": "🇦 آرژانتین", "uefa.champions": "🇪 لیگ قهرمانان اروپا", "uefa.europa": "🇪🇺 لیگ اروپا"}
 VOLATILE = {"eng.2", "eng.3", "esp.2", "fra.2", "ita.2", "ger.2"}
+OFF = {"eng.1": 0, "esp.1": 0, "ger.1": 0, "ita.1": 0, "fra.1": 1, "por.1": 4, "bra.1": 4, "ned.1": 5, "arg.1": 5, "tur.1": 6, "ksa.1": 6, "mex.1": 6, "usa.1": 7, "jpn.1": 7, "eng.2": 8, "esp.2": 8, "ger.2": 8, "ita.2": 8, "fra.2": 8, "eng.3": 12}
 TENNIS = {"atp": "🎾 ATP", "wta": "🎾 WTA"}
 WD = ["شنبه", "یکشنبه", "دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه"]
 MO = ["فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور", "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"]
@@ -17,6 +18,7 @@ STOP = {"city", "united", "fc", "sc", "ac", "athletic", "real", "club", "sportin
 MIN_EDGE = 0.03
 MAX_EDGE = 0.20
 SOCCER_GAP = 45
+CROSS_GAP = 35
 TENNIS_GAP = 30
 DEFAULT_RANK = 17
 
@@ -173,21 +175,6 @@ def tennis_fixtures(days=5):
         out += got
     return out
 
-def tennis_probe():
-    try:
-        r = httpx.get(f"{ESPN}/site/v2/sports/tennis/atp/scoreboard", timeout=15)
-        d = r.json()
-        evs = d.get("events", [])
-        if not evs:
-            return "events=0"
-        for ev in evs[:3]:
-            cs = ev.get("competitions", [{}])[0].get("competitors", [])
-            if cs:
-                return f"comp_keys={list(cs[0].keys())[:8]} | ath_keys={list((cs[0].get('athlete') or {}).keys())[:6]}"
-        return "raw=" + json.dumps(evs[0], ensure_ascii=False)[:250]
-    except Exception as ex:
-        return f"err: {ex}"
-
 def boost_of(d, eff_rank):
     played = d.get("played", 0)
     pts = d.get("pts")
@@ -196,15 +183,6 @@ def boost_of(d, eff_rank):
     actual = pts / played
     expected = 2.2 - (eff_rank - 1) * 0.068
     return actual - expected
-
-def boost_tag(b):
-    if b is None:
-        return "—"
-    if b >= 0.5:
-        return f"🚀+{fa(round(b,2))}"
-    if b <= -0.5:
-        return f"📉{fa(round(b,2))}"
-    return f"➖{fa(round(b,2))}"
 
 def tennis_power(rank):
     return 100 - 30 * math.log10(max(int(rank), 1) + 1)
@@ -331,6 +309,16 @@ def find_poly(evlist, home, away, sport, date=""):
             return ev
     return None
 
+def cross_info(name, cur, last):
+    for tbl in (cur, last):
+        for slug, t in tbl.items():
+            if slug.startswith("uefa."):
+                continue
+            if name in t:
+                d = t[name]
+                return min(24, OFF.get(slug, 10) + d.get("rank", DEFAULT_RANK) - 1), d
+    return 18, {}
+
 def compute(m, cur, last, tr):
     solid = False
     rsrc = "cur"
@@ -338,66 +326,97 @@ def compute(m, cur, last, tr):
     hcr = hlr = acr = alr = None
     bh = ba = None
     detail = None
+    cross = m["sport"] == "soccer" and m["slug"].startswith("uefa.")
     if m["sport"] == "soccer":
-        t = cur.get(m["slug"], {})
-        hd, ad = t.get(m["home"], {}), t.get(m["away"], {})
-        lh = last.get(m["slug"], {}).get(m["home"], {})
-        la = last.get(m["slug"], {}).get(m["away"], {})
-        h_played = hd.get("played", 0)
-        a_played = ad.get("played", 0)
-        h_cur = h_played >= 5
-        a_cur = a_played >= 5
-        if h_cur != a_cur:
-            return None
-        hcr = hd.get("rank") if h_cur else None
-        acr = ad.get("rank") if a_cur else None
-        hlr = lh.get("rank")
-        alr = la.get("rank")
-        def eff(cr, lr, played):
-            if cr is None and lr is None:
-                return float(DEFAULT_RANK)
-            if cr is None:
-                return float(lr)
-            if lr is None:
-                w = min(1.0, played / 15.0)
-                return cr * w + DEFAULT_RANK * (1 - w)
-            w = min(1.0, played / 12.0)
-            return cr * w + lr * (1 - w)
-        ehr = eff(hcr, hlr, h_played)
-        ear = eff(acr, alr, a_played)
-        bh = boost_of(hd, ehr)
-        ba = boost_of(ad, ear)
-        early = min(h_played, a_played) < 8
-        soft = early or m["slug"] in VOLATILE
-        mult = 2 if soft else 3
-        fbw = 25 if soft else 15
-        gbw = 8 if soft else 5
-        gbc = 15 if soft else 10
-        home_b = 6 if soft else 8
-        def comps(eff_rank, d):
-            base = 100 - eff_rank * mult
-            played = d.get("played", 0)
-            if played:
-                fb = (d.get("wins", 0) / played - 0.4) * fbw
-                gb = max(-gbc, min(gbc, ((d.get("gf", 0) - d.get("ga", 0)) / played) * gbw))
-            else:
-                fb = gb = 0
-            return base, fb, gb
-        base_h, fb_h, gb_h = comps(ehr, hd)
-        base_a, fb_a, gb_a = comps(ear, ad)
-        hp = max(0, min(100, base_h + fb_h + gb_h + home_b))
-        ap = max(0, min(100, base_a + fb_a + gb_a))
-        detail = {"mult": mult, "fbw": fbw, "gbw": gbw, "gbc": gbc, "early": early, "soft": soft, "h": {"cr": hcr, "lr": hlr, "eff": round(ehr, 1), "base": round(base_h, 1), "fb": round(fb_h, 1), "gb": round(gb_h, 1), "home": home_b, "power": round(hp, 1), "boost": bh}, "a": {"cr": acr, "lr": alr, "eff": round(ear, 1), "base": round(base_a, 1), "fb": round(fb_a, 1), "gb": round(gb_a, 1), "home": 0, "power": round(ap, 1), "boost": ba}}
-        hr = int(round(ehr))
-        ar = int(round(ear))
-        if h_cur and hlr:
-            rsrc = "blend"
-        elif h_cur:
-            rsrc = "cur"
+        if cross:
+            ehr, hd = cross_info(m["home"], cur, last)
+            ear, ad = cross_info(m["away"], cur, last)
+            hcr, acr = ehr, ear
+            hlr = alr = None
+            h_played = hd.get("played", 0)
+            a_played = ad.get("played", 0)
+            bh = boost_of(hd, ehr)
+            ba = boost_of(ad, ear)
+            early = True
+            mult, fbw, gbw, gbc, home_b = 3, 25, 8, 15, 6
+            def comps_x(eff_rank, d):
+                base = 100 - eff_rank * mult
+                played = d.get("played", 0)
+                if played:
+                    fb = (d.get("wins", 0) / played - 0.4) * fbw
+                    gb = max(-gbc, min(gbc, ((d.get("gf", 0) - d.get("ga", 0)) / played) * gbw))
+                else:
+                    fb = gb = 0
+                return base, fb, gb
+            base_h, fb_h, gb_h = comps_x(ehr, hd)
+            base_a, fb_a, gb_a = comps_x(ear, ad)
+            hp = max(0, min(100, base_h + fb_h + gb_h + home_b))
+            ap = max(0, min(100, base_a + fb_a + gb_a))
+            detail = {"mult": mult, "fbw": fbw, "gbw": gbw, "gbc": gbc, "early": early, "soft": True, "cross": True, "h": {"cr": hcr, "lr": None, "eff": ehr, "base": round(base_h, 1), "fb": round(fb_h, 1), "gb": round(gb_h, 1), "home": home_b, "power": round(hp, 1), "boost": bh}, "a": {"cr": acr, "lr": None, "eff": ear, "base": round(base_a, 1), "fb": round(fb_a, 1), "gb": round(gb_a, 1), "home": 0, "power": round(ap, 1), "boost": ba}}
+            hr, ar = ehr, ear
+            rsrc = "cross"
+            solid = False
+            low = True
         else:
-            rsrc = "last"
-        solid = (h_cur and a_cur and h_played >= 8 and a_played >= 8) or ((not h_cur) and (not a_cur) and lh.get("played", 0) >= 20 and la.get("played", 0) >= 20)
-        low = not (h_cur and a_cur)
+            t = cur.get(m["slug"], {})
+            hd, ad = t.get(m["home"], {}), t.get(m["away"], {})
+            lh = last.get(m["slug"], {}).get(m["home"], {})
+            la = last.get(m["slug"], {}).get(m["away"], {})
+            h_played = hd.get("played", 0)
+            a_played = ad.get("played", 0)
+            h_cur = h_played >= 5
+            a_cur = a_played >= 5
+            if h_cur != a_cur:
+                return None
+            hcr = hd.get("rank") if h_cur else None
+            acr = ad.get("rank") if a_cur else None
+            hlr = lh.get("rank")
+            alr = la.get("rank")
+            def eff(cr, lr, played):
+                if cr is None and lr is None:
+                    return float(DEFAULT_RANK)
+                if cr is None:
+                    return float(lr)
+                if lr is None:
+                    w = min(1.0, played / 15.0)
+                    return cr * w + DEFAULT_RANK * (1 - w)
+                w = min(1.0, played / 12.0)
+                return cr * w + lr * (1 - w)
+            ehr = eff(hcr, hlr, h_played)
+            ear = eff(acr, alr, a_played)
+            bh = boost_of(hd, ehr)
+            ba = boost_of(ad, ear)
+            early = min(h_played, a_played) < 8
+            soft = early or m["slug"] in VOLATILE
+            mult = 2 if soft else 3
+            fbw = 25 if soft else 15
+            gbw = 8 if soft else 5
+            gbc = 15 if soft else 10
+            home_b = 6 if soft else 8
+            def comps(eff_rank, d):
+                base = 100 - eff_rank * mult
+                played = d.get("played", 0)
+                if played:
+                    fb = (d.get("wins", 0) / played - 0.4) * fbw
+                    gb = max(-gbc, min(gbc, ((d.get("gf", 0) - d.get("ga", 0)) / played) * gbw))
+                else:
+                    fb = gb = 0
+                return base, fb, gb
+            base_h, fb_h, gb_h = comps(ehr, hd)
+            base_a, fb_a, gb_a = comps(ear, ad)
+            hp = max(0, min(100, base_h + fb_h + gb_h + home_b))
+            ap = max(0, min(100, base_a + fb_a + gb_a))
+            detail = {"mult": mult, "fbw": fbw, "gbw": gbw, "gbc": gbc, "early": early, "soft": soft, "h": {"cr": hcr, "lr": hlr, "eff": round(ehr, 1), "base": round(base_h, 1), "fb": round(fb_h, 1), "gb": round(gb_h, 1), "home": home_b, "power": round(hp, 1), "boost": bh}, "a": {"cr": acr, "lr": alr, "eff": round(ear, 1), "base": round(base_a, 1), "fb": round(fb_a, 1), "gb": round(gb_a, 1), "home": 0, "power": round(ap, 1), "boost": ba}}
+            hr = int(round(ehr))
+            ar = int(round(ear))
+            if h_cur and hlr:
+                rsrc = "blend"
+            elif h_cur:
+                rsrc = "cur"
+            else:
+                rsrc = "last"
+            solid = (h_cur and a_cur and h_played >= 8 and a_played >= 8) or ((not h_cur) and (not a_cur) and lh.get("played", 0) >= 20 and la.get("played", 0) >= 20)
+            low = not (h_cur and a_cur)
     else:
         hr = tr.get(m["slug"], {}).get(m["home"].lower().split()[-1])
         ar = tr.get(m["slug"], {}).get(m["away"].lower().split()[-1])
@@ -408,15 +427,20 @@ def compute(m, cur, last, tr):
         solid = True
         rsrc = "rank"
     gap = abs(hp - ap)
-    thr = SOCCER_GAP if m["sport"] == "soccer" else TENNIS_GAP
+    if cross:
+        thr = CROSS_GAP
+    elif m["sport"] == "soccer":
+        thr = SOCCER_GAP
+    else:
+        thr = TENNIS_GAP
     if gap < thr:
         return None
     sh = hp > ap
     soft = bool(detail and detail.get("soft")) if detail else False
-    prob = model_prob(gap, soft)
-    if m["sport"] == "soccer" and min(hd.get("played", 0), ad.get("played", 0)) < 8:
+    prob = model_prob(gap, soft or cross)
+    if cross or (m["sport"] == "soccer" and min(hd.get("played", 0), ad.get("played", 0)) < 8):
         prob = min(prob, 0.80)
-    return {"gap": gap, "thr": thr, "stronger": m["home"] if sh else m["away"], "sh": sh, "prob": prob, "low": low, "solid": solid, "hr": hr, "ar": ar, "rsrc": rsrc, "hcr": hcr, "hlr": hlr, "acr": acr, "alr": alr, "bh": bh, "ba": ba, "detail": detail}
+    return {"gap": gap, "thr": thr, "stronger": m["home"] if sh else m["away"], "sh": sh, "prob": prob, "low": low, "solid": solid, "hr": hr, "ar": ar, "rsrc": rsrc, "hcr": hcr, "hlr": hlr, "acr": acr, "alr": alr, "bh": bh, "ba": ba, "detail": detail, "cross": cross}
 
 def load_state():
     if os.path.exists("state.json"):
@@ -433,22 +457,6 @@ def save_state(s):
     s["watchlist"] = s.get("watchlist", [])[-100:]
     s["last_links"] = s.get("last_links", [])[-10:]
     json.dump(s, open("state.json", "w"))
-
-def rank_line(a):
-    def rr(x):
-        return fa(x) if x else "—"
-    if a.get("hcr") is not None or a.get("hlr") is not None:
-        return f"\n🏅 رتبه (جاری/قبل): {a['home']} {rr(a.get('hcr'))}/{rr(a.get('hlr'))} | {a['away']} {rr(a.get('acr'))}/{rr(a.get('alr'))}"
-    if a.get("hr") is not None:
-        src = {"cur": "فصل جاری", "last": "فصل قبل", "rank": "رنکینگ جهانی", "blend": "ترکیب جاری و قبل"}.get(a.get("rsrc"), "")
-        return f"\n🏅 رتبه: {a['home']} → {fa(a['hr'])} | {a['away']} → {fa(a['ar'])} ({src})"
-    return ""
-
-def boost_line(a):
-    bh, ba = a.get("bh"), a.get("ba")
-    if bh is None and ba is None:
-        return ""
-    return f"\n⚡ بوست فرم: {a['home']} {boost_tag(bh)} | {a['away']} {boost_tag(ba)}"
 
 def rank_of(cr, lr):
     def rr(x):
@@ -474,7 +482,7 @@ def notify(emoji, a):
     if a.get("hcr") is not None or a.get("hlr") is not None:
         L += ["", "🏅 رتبه‌ها:", f"   {a['home']}: {rank_of(a.get('hcr'), a.get('hlr'))}", f"   {a['away']}: {rank_of(a.get('acr'), a.get('alr'))}"]
     elif a.get("hr") is not None:
-        src = {"cur": "فصل جاری", "last": "فصل قبل", "rank": "رنکینگ جهانی", "blend": "ترکیب جاری و قبل"}.get(a.get("rsrc"), "")
+        src = {"cur": "فصل جاری", "last": "فصل قبل", "rank": "رنکینگ جهانی", "blend": "ترکیب جاری و قبل", "cross": "معادل اروپایی"}.get(a.get("rsrc"), "")
         L += ["", "🏅 رتبه‌ها:", f"   {a['home']}: {fa(a['hr'])} ({src})", f"   {a['away']}: {fa(a['ar'])} ({src})"]
     if a.get("bh") is not None or a.get("ba") is not None:
         L += ["", "⚡ فرم نسبت به انتظار:", f"   {a['home']}: {btag(a.get('bh'))}", f"   {a['away']}: {btag(a.get('ba'))}"]
