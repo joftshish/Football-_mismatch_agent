@@ -1,14 +1,14 @@
 import httpx, json, math, os, unicodedata
 from datetime import datetime, timedelta, timezone
 
-VERSION = "core21"
+VERSION = "core22"
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 ESPN = "https://site.api.espn.com/apis"
 POLY = "https://gamma-api.polymarket.com"
 TZ = timezone(timedelta(hours=3, minutes=30))
 FAD = "".join(chr(1632 + i) for i in range(10))
-SOCCER = {"eng.1": "🏴 لیگ برتر انگلیس", "esp.1": "🇪🇸 لالیگا", "ger.1": "🇩🇪 بوندس‌لیگا", "ita.1": "🇮🇹 سری آ", "fra.1": "🇫🇷 لیگ ۱", "por.1": "🇵 پرتغال", "ksa.1": "🇸🇦 عربستان", "eng.2": "🏴 Championship", "esp.2": "🇪🇸 Segunda", "usa.1": "🇺🇸 MLS", "bra.1": "🇧 برزیل", "mex.1": "🇲🇽 مکزیک", "ned.1": "🇳🇱 هلند", "tur.1": "🇹🇷 ترکیه", "jpn.1": "🇯🇵 ژاپن", "ger.2": "🇩🇪 بوندس‌لیگا۲", "ita.2": "🇮🇹 سری B", "eng.3": "🏴 League One", "fra.2": "🇫🇷 لیگ ۲", "arg.1": "🇦 آرژانتین", "uefa.champions": "🇪 لیگ قهرمانان اروپا", "uefa.europa": "🇪🇺 لیگ اروپا"}
+SOCCER = {"eng.1": "🏴 لیگ برتر انگلیس", "esp.1": "🇪🇸 لالیگا", "ger.1": "🇩🇪 بوندس‌لیگا", "ita.1": "🇮🇹 سری آ", "fra.1": "🇫🇷 لیگ ۱", "por.1": "🇵🇹 پرتغال", "ksa.1": "🇸🇦 عربستان", "eng.2": "🏴 Championship", "esp.2": "🇪🇸 Segunda", "usa.1": "🇺🇸 MLS", "bra.1": "🇧🇷 برزیل", "mex.1": "🇲🇽 مکزیک", "ned.1": "🇳🇱 هلند", "tur.1": "🇹🇷 ترکیه", "jpn.1": "🇯🇵 ژاپن", "ger.2": "🇩🇪 بوندس‌لیگا۲", "ita.2": "🇮 سری B", "eng.3": "🏴 League One", "fra.2": "🇫🇷 لیگ ۲", "arg.1": "🇦🇷 آرژانتین", "uefa.champions": "🇪🇺 لیگ قهرمانان اروپا", "uefa.europa": "🇪🇺 لیگ اروپا"}
 VOLATILE = {"eng.2", "eng.3", "esp.2", "fra.2", "ita.2", "ger.2"}
 OFF = {"eng.1": 0, "esp.1": 0, "ger.1": 0, "ita.1": 0, "fra.1": 1, "por.1": 4, "bra.1": 4, "ned.1": 5, "arg.1": 5, "tur.1": 6, "ksa.1": 6, "mex.1": 6, "usa.1": 7, "jpn.1": 7, "eng.2": 8, "esp.2": 8, "ger.2": 8, "ita.2": 8, "fra.2": 8, "eng.3": 12}
 TENNIS = {"atp": "🎾 ATP", "wta": "🎾 WTA"}
@@ -174,6 +174,21 @@ def tennis_fixtures(days=5):
                 print("tfx2 err", tour, ex)
         out += got
     return out
+
+def tennis_probe():
+    try:
+        r = httpx.get(f"{ESPN}/site/v2/sports/tennis/atp/scoreboard", timeout=15)
+        d = r.json()
+        evs = d.get("events", [])
+        if not evs:
+            return "events=0"
+        for ev in evs[:3]:
+            cs = ev.get("competitions", [{}])[0].get("competitors", [])
+            if cs:
+                return f"comp_keys={list(cs[0].keys())[:8]} | ath_keys={list((cs[0].get('athlete') or {}).keys())[:6]}"
+        return "raw=" + json.dumps(evs[0], ensure_ascii=False)[:250]
+    except Exception as ex:
+        return f"err: {ex}"
 
 def boost_of(d, eff_rank):
     played = d.get("played", 0)
@@ -510,3 +525,41 @@ def notify_watch(m, c):
         L += ["", "⚡ فرم نسبت به انتظار:", f"   {m['home']}: {btag(c.get('bh'))}", f"   {m['away']}: {btag(c.get('ba'))}"]
     L += ["", f"📊 نظر مدل: {fa(round(c['prob']*100))}٪ برد {c['stronger']}", "💰 بازار: هنوز باز نشده", "", "⏰ Fast Scan هر ۵ دقیقه چک می‌کنه؛ به محض باز شدن، نوتیف ⚡ با لینک می‌گیری"]
     return send("\n".join(L))
+
+def _f(x):
+    try:
+        return float(x)
+    except Exception:
+        return None
+
+def market_stats(ev, home, away, sport):
+    kh, ka = keys(home, sport), keys(away, sport)
+    mks = get_markets(ev)
+    pick = None
+    for mk in mks:
+        try:
+            oc = mk.get("outcomes")
+            if isinstance(oc, str):
+                oc = json.loads(oc)
+            if not (len(oc or []) == 2 and str(oc[0]).lower() == "yes"):
+                continue
+            q = norm((mk.get("question") or "") + " " + (mk.get("groupItemTitle") or ""))
+            if any(k in q for k in kh) or any(k in q for k in ka):
+                pick = mk
+                break
+        except Exception:
+            continue
+    if pick is None and mks:
+        pick = mks[0]
+    if not pick:
+        return {"vol": 0.0, "liq": 0.0, "bid": None, "ask": None}
+    return {"vol": _f(pick.get("volumeNum")) or 0.0, "liq": _f(pick.get("liquidityNum")) or 0.0, "bid": _f(pick.get("bestBid")), "ask": _f(pick.get("bestAsk"))}
+
+def liq_stage(liq):
+    if liq < 1500:
+        return "thin"
+    if liq < 15000:
+        return "grow"
+    return "deep"
+
+STAGE_FA = {"thin": "🫧 خام (قیمت کشف‌نشده)", "grow": "🌊 در حال رشد (همگرایی)", "deep": "🏊 عمیق (کارا — زمان خروج)"}
