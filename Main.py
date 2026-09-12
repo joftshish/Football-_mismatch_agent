@@ -10,7 +10,7 @@ def is_past(ds, grace=1.0):
         return False
 
 def main():
-    print("=== v25 ===")
+    print("=== v27 ===")
     st = C.load_state()
     prefs = st.get("prefs", {})
     cal = st.get("calib", 1.0)
@@ -31,9 +31,16 @@ def main():
     min_e = prefs.get("min_edge", C.MIN_EDGE)
     now = datetime.now(timezone.utc)
     ls = (now.year if now.month >= 7 else now.year - 1) - 1
-    fx = C.soccer_fixtures() + C.tennis_fixtures()
-    cur = C.soccer_standings()
-    last = C.soccer_standings(ls)
+    cache = C.standings_cache_load(st)
+    if cache and cache.get("ls") == ls:
+        cur, last = cache["cur"], cache["last"]
+        fx = C.soccer_fixtures() + C.tennis_fixtures()
+        print("standings from cache")
+    else:
+        fx = C.soccer_fixtures() + C.tennis_fixtures()
+        cur = C.soccer_standings()
+        last = C.soccer_standings(ls)
+        C.standings_cache_save(st, cur, last, ls)
     tr = C.tennis_rankings()
     pev = C.poly_events()
     vb = mm = wl = skipped = 0
@@ -57,9 +64,14 @@ def main():
             ph, pa = C.poly_prices(ev, m["home"], m["away"], m["sport"])
         if ev and ph is not None:
             price = ph if c["sh"] else pa
+            P = c.get("pred", 0.6)
+            c["prob"] = P * c["prob"] + (1 - P) * price
             edge = c["prob"] - price
-            kl = C.kelly(c["prob"], price)
-            is_value = c.get("solid", False) and edge >= min_e and edge <= C.MAX_EDGE and kl > 0
+            hold_ok = bool(c.get("solid")) and P >= 0.65 and not c.get("cross") and edge >= min_e and edge <= C.MAX_EDGE
+            kl = C.kelly(c["prob"], price, 0.02) if hold_ok else 0.0
+            is_value = hold_ok and kl > 0
+            sigtype = "✅ Hold — تا پایان بازی" if is_value else "🎯 Trade — خروج قبل از بازی"
+            size = f"تا {C.fa(round(kl*100,1))}٪ سرمایه" if is_value else "حداکثر ۱٪ (ترید کوتاه)"
             note = None
             if edge > C.MAX_EDGE:
                 note = "⚠️ لبه مشکوک (زیاد) — با احتیاط!"
@@ -68,7 +80,7 @@ def main():
             elif not is_value and edge < min_e:
                 note = f"❌ لبه کم ({C.fa(round(edge*100,1))}٪) — ارزش بستن ندارد"
             lab = "کاملاً نابرابر 🔴" if c["gap"] >= c["thr"] + 10 else "به‌وضوح نابرابر 🟠"
-            a = {"title": "VALUE BET 💰" if is_value else "بازی نابرابر ⚔️", "league": m["league"], "date": m["date"], "home": m["home"], "away": m["away"], "stronger": c["stronger"], "prob": c["prob"], "price": price, "edge": edge, "kelly": kl if is_value else 0, "label": lab, "icon": "🎾" if m["sport"] == "tennis" else "⚽", "link": C.poly_link(ev), "note": note, "hr": c.get("hr"), "ar": c.get("ar"), "rsrc": c.get("rsrc"), "hcr": c.get("hcr"), "hlr": c.get("hlr"), "acr": c.get("acr"), "alr": c.get("alr"), "bh": c.get("bh"), "ba": c.get("ba")}
+            a = {"title": "VALUE BET 💰" if is_value else "بازی نابرابر ⚔️", "league": m["league"], "date": m["date"], "home": m["home"], "away": m["away"], "stronger": c["stronger"], "prob": c["prob"], "price": price, "edge": edge, "kelly": kl if is_value else 0, "label": lab, "icon": "🎾" if m["sport"] == "tennis" else "⚽", "link": C.poly_link(ev), "note": note, "sigtype": sigtype, "size": size, "hr": c.get("hr"), "ar": c.get("ar"), "rsrc": c.get("rsrc"), "hcr": c.get("hcr"), "hlr": c.get("hlr"), "acr": c.get("acr"), "alr": c.get("alr"), "hcty": c.get("hcty", ""), "acty": c.get("acty", ""), "bh": c.get("bh"), "ba": c.get("ba")}
             rows.append((c["gap"], f"{m['home']} - {m['away']}\n   گپ {C.fa(round(c['gap']))} | بازار {C.fa(round(price*100))}٪ | لبه {C.fa(round(edge*100,1))}٪"))
             eid = str(ev.get("id"))
             if m["id"] not in noted and eid not in known:
@@ -83,7 +95,7 @@ def main():
                         mm += 1
                     noted.append(m["id"])
                     known.append(eid)
-                    preds.append({"home": m["home"], "away": m["away"], "sport": m["sport"], "slug": m["slug"], "date": m["date"], "prob": round(c["prob"], 3), "price": round(price, 3), "stronger": c["stronger"], "link": a.get("link"), "status": "open"})
+                    preds.append({"home": m["home"], "away": m["away"], "sport": m["sport"], "slug": m["slug"], "date": m["date"], "prob": round(c["prob"], 3), "price": round(price, 3), "stronger": c["stronger"], "link": a.get("link"), "eid": eid, "vol0": 0, "liq0": 0, "status": "open"})
                     if a.get("link"):
                         links.append(f"{m['home']} vs {m['away']}\n{a['link']}")
         else:
@@ -105,7 +117,7 @@ def main():
     rows.sort(reverse=True)
     top = "\n".join(r[1] for r in rows[:8]) or "—"
     extra = ("\n\n🔬 " + "\n".join(dbg)) if dbg else ""
-    C.send(f"📊 گزارش v25 | {getattr(C, 'VERSION', 'CORE-GHADIMI!')}\nبازی‌ها: {C.fa(len(fx))} | بدون بازار: {C.fa(skipped)}\n💰 Value: {C.fa(vb)} | ⚔️ نابرابر: {C.fa(mm)} | 👀 Watch: {C.fa(wl)}\n\nبرترین‌ها:\n{top}{extra}", html=False)
+    C.send(f"📊 گزارش v27 | {getattr(C, 'VERSION', 'CORE-GHADIMI!')}\nبازی‌ها: {C.fa(len(fx))} | بدون بازار: {C.fa(skipped)}\n💰 Value: {C.fa(vb)} | ⚔️ نابرابر: {C.fa(mm)} | 👀 Watch: {C.fa(wl)}\n\nبرترین‌ها:\n{top}{extra}", html=False)
     st["last_summary"] = now.strftime("%Y-%m-%d")
     C.save_state(st)
     print("done", vb, mm, wl)
