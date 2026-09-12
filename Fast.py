@@ -53,6 +53,10 @@ def build_m(ev, cur, tr):
                 slug = s
                 break
         if not slug:
+            if C.cross_info(home, cur, {})[2] or C.cross_info(away, cur, {})[2]:
+                m["slug"] = "uefa.champions"
+                m["league"] = "🇪🇺 اروپا"
+                return m
             return None
         m["slug"] = slug
         m["league"] = C.SOCCER[slug]
@@ -73,11 +77,33 @@ def analyze_ev(ev, cur, last, tr, min_e, cal):
     if ph is None:
         return None
     price = ph if c["sh"] else pa
+    P = c.get("pred", 0.6)
+    c["prob"] = P * c["prob"] + (1 - P) * price
     edge = c["prob"] - price
-    kl = C.kelly(c["prob"], price)
-    if edge < min_e or edge > C.MAX_EDGE or kl <= 0 or not c["solid"]:
+    hold_ok = bool(c.get("solid")) and P >= 0.65 and not c.get("cross") and edge >= min_e and edge <= C.MAX_EDGE
+    kl = C.kelly(c["prob"], price, 0.02) if hold_ok else 0.0
+    if edge < min_e or edge > C.MAX_EDGE or kl <= 0 or not hold_ok:
         return None
-    return {"m": m, "c": c, "price": price, "edge": edge, "kl": kl, "title": "VALUE BET زودهنگام ⚡", "league": m["league"], "date": m["date"], "home": m["home"], "away": m["away"], "stronger": c["stronger"], "prob": c["prob"], "label": "به‌وضوح نابرابر 🟠", "icon": "🎾" if m["sport"] == "tennis" else "⚽", "link": C.poly_link(ev), "note": "⚡ بازار تازه ایجاد شد", "hcr": c.get("hcr"), "hlr": c.get("hlr"), "acr": c.get("acr"), "alr": c.get("alr"), "bh": c.get("bh"), "ba": c.get("ba")}
+    return {"m": m, "c": c, "price": price, "edge": edge, "kl": kl, "title": "VALUE BET زودهنگام ⚡", "league": m["league"], "date": m["date"], "home": m["home"], "away": m["away"], "stronger": c["stronger"], "prob": c["prob"], "label": "به‌وضوح نابرابر 🟠", "icon": "🎾" if m["sport"] == "tennis" else "⚽", "link": C.poly_link(ev), "note": "⚡ بازار تازه ایجاد شد", "sigtype": "✅ Hold — تا پایان بازی", "size": f"تا {C.fa(round(kl*100,1))}٪ سرمایه", "hcr": c.get("hcr"), "hlr": c.get("hlr"), "acr": c.get("acr"), "alr": c.get("alr"), "hcty": c.get("hcty", ""), "acty": c.get("acty", ""), "bh": c.get("bh"), "ba": c.get("ba")}
+
+def analyze_ev_for_underpriced(ev, cur, last, tr):
+    m = build_m(ev, cur, tr)
+    if not m:
+        return None
+    c = C.compute(m, cur, last, tr)
+    if not c:
+        return None
+    if c["gap"] < 50:
+        return None
+    ph, pa = C.poly_prices(ev, m["home"], m["away"], m["sport"])
+    if ph is None:
+        return None
+    price_strong = ph if c["sh"] else pa
+    if price_strong is None:
+        return None
+    if not (0.40 <= price_strong <= 0.60):
+        return None
+    return {"m": m, "c": c, "price": price_strong, "stronger": c["stronger"], "hcty": c.get("hcty", ""), "acty": c.get("acty", "")}
 
 def main():
     st = C.load_state()
@@ -96,6 +122,15 @@ def main():
     min_e = prefs.get("min_edge", C.MIN_EDGE)
     now = datetime.now(timezone.utc)
     now_ts = now.timestamp()
+    ls = (now.year if now.month >= 7 else now.year - 1) - 1
+    cache = C.standings_cache_load(st)
+    if cache and cache.get("ls") == ls:
+        cur, last = cache["cur"], cache["last"]
+    else:
+        cur = C.soccer_standings()
+        last = C.soccer_standings(ls)
+        C.standings_cache_save(st, cur, last, ls)
+    tr = C.tennis_rankings()
     evs = C.poly_events()
     fresh = [e for e in evs if str(e.get("id")) not in known]
     print("poly:", len(evs), "fresh:", len(fresh))
@@ -108,8 +143,7 @@ def main():
     for p in preds:
         if p.get("status") == "open" and p.get("eid"):
             open_eids.add(p["eid"])
-    cur = tr = last = None
-    for e in evs[:150]:
+    for e in evs[:200]:
         eid = str(e.get("id"))
         s = snap_of(e)
         if not s:
@@ -126,10 +160,7 @@ def main():
         rec["hf"], rec["hdp"], rec["liq"], rec["eid"] = hour_flow, hour_dp, s["liq"], eid
         if eid in open_eids or eid in flow_sig or is_past(e.get("startDate") or ""):
             continue
-        if hour_flow >= 500 and s["liq"] < 15000:
-            if cur is None:
-                cur = C.soccer_standings()
-                tr = C.tennis_rankings()
+        if hour_flow >= 500 and s["vol"] < 15000:
             m = build_m(e, cur, tr)
             if not m or m["league"] in off_l:
                 continue
@@ -142,13 +173,43 @@ def main():
             else:
                 continue
             flow_sig.append(eid)
-            C.send(f"🌊 سیگنال ورود پول هوشمند\n⚽ {m['home']} vs {m['away']}\n💰 پول ۱ ساعت: {C.fa(int(hour_flow))} دلار\n🎯 سمت جریان: {stronger} @ {C.fa(round(rec['p']*100))}٪\n💧 {C.STAGE_FA[C.liq_stage(s['liq'])]}\n⚠️ بر پایه جریان پول (نه مدل) — احتیاط\n📋 لینک:\n{C.poly_link(e)}", html=False)
+            C.send(f"🌊 سیگنال ورود پول هوشمند\n⚽ {m['home']} vs {m['away']}\n💰 پول ۱ ساعت: {C.fa(int(hour_flow))} دلار\n🎯 سمت جریان: {stronger} @ {C.fa(round(rec['p']*100))}٪\n💰 حجم کل: {C.fa(int(s['vol']))} دلار — {C.STAGE_FA[C.liq_stage(s['vol'])]}\n🎯 نوع: Trade — خروج قبل از بازی\n💵 حداکثر ۱٪\n⚠️ بر پایه جریان پول (نه مدل) — احتیاط\n📋 لینک:\n{C.poly_link(e)}", html=False)
             preds.append({"home": m["home"], "away": m["away"], "sport": m["sport"], "slug": m["slug"], "date": m["date"], "prob": rec["p"], "price": round(rec["p"], 3), "stronger": stronger, "link": C.poly_link(e), "liq0": s["liq"], "vol0": s["vol"], "eid": eid, "status": "open", "src": "flow"})
             sent += 1
     flow_sig[:] = flow_sig[-200:]
-    if len(flow) > 200:
-        for k in list(flow.keys())[:len(flow) - 200]:
+    if len(flow) > 300:
+        for k in list(flow.keys())[:len(flow) - 300]:
             flow.pop(k, None)
+    for e in fresh[:30]:
+        if is_past(e.get("startDate") or ""):
+            continue
+        stats = C.market_stats(e, "", "", "")
+        try:
+            mks = e.get("markets") or []
+            if mks:
+                stats["vol"] = float(mks[0].get("volumeNum") or 0)
+                stats["liq"] = float(mks[0].get("liquidityNum") or 0)
+        except Exception:
+            pass
+        if stats["vol"] >= 15000:
+            continue
+        ua = analyze_ev_for_underpriced(e, cur, last, tr)
+        if not ua:
+            continue
+        if ua["m"]["league"] in off_l:
+            continue
+        eid = str(e.get("id"))
+        if eid in noted:
+            continue
+        noted.append(eid)
+        known.append(eid)
+        flow_sig.append(eid)
+        hc = ua["hcty"]
+        ac = ua["acty"]
+        txt = f"🎯 شکار بازار تازه آندر ولیو\n⚽ {ua['m']['home']} {hc} vs {ua['m']['away']} {ac}\n🏆 {ua['m']['league']}\n📊 مدل (gap {C.fa(round(ua['c']['gap']))}): تیم قوی {ua['stronger']}\n💰 قیمت بازار: ~{C.fa(round(ua['price']*100))}٪ (نزدیک ۵۰/۵۰!)\n💰 حجم: {C.fa(int(stats['vol']))} دلار — {C.STAGE_FA[C.liq_stage(stats['vol'])]}\n🎯 نوع: Trade — خروج قبل از بازی\n💵 حداکثر ۱٪\n⚠️ فقط اطلاع — قضاوت با شما\n📋 لینک:\n{C.poly_link(e)}"
+        C.send(txt, html=False)
+        preds.append({"home": ua["m"]["home"], "away": ua["m"]["away"], "sport": ua["m"]["sport"], "slug": ua["m"]["slug"], "date": ua["m"]["date"], "prob": ua["price"], "price": round(ua["price"], 3), "stronger": ua["stronger"], "link": C.poly_link(e), "liq0": stats["liq"], "vol0": stats["vol"], "eid": eid, "status": "open", "src": "underpriced"})
+        sent += 1
     for p in preds:
         if p.get("status") != "open" or not p.get("link"):
             continue
@@ -166,9 +227,9 @@ def main():
         if curp is None:
             continue
         stats = C.market_stats(ev, p["home"], p["away"], p["sport"])
-        stage = C.liq_stage(stats["liq"])
+        stage = C.liq_stage(stats["vol"])
         money_in = stats["vol"] - p.get("vol0", 0)
-        flowline = f"💰 پول از ورود: {C.fa(int(money_in))} دلار | {C.STAGE_FA[stage]}"
+        flowline = f"💰 پول از ورود: {C.fa(int(money_in))} دلار | حجم کل: {C.fa(int(stats['vol']))} | {C.STAGE_FA[stage]}"
         rec = flow.get(p.get("eid", ""))
         reversal = bool(rec) and C.norm(rec["side"]) == C.norm(p["stronger"]) and rec.get("hf", 0) >= 1000 and rec.get("hdp", 0) <= -0.03
         entry = p["price"]
@@ -208,12 +269,7 @@ def main():
             arrow = "📈" if drift > 0 else "📉"
             C.send(f"📊 حرکت قیمت از لحظه ورود\n⚽ {p['home']} vs {p['away']}\n📥 ورود: {C.fa(round(entry*100))}٪ | {arrow} الان: {C.fa(round(curp*100))}٪ ({'+' if drift>0 else ''}{C.fa(round(drift*100,1))})\n{flowline}\nℹ️ فقط اطلاع — هنوز سیگنال خروج نیست", html=False)
             sent += 1
-    if fresh or watch:
-        if cur is None:
-            cur = C.soccer_standings()
-            tr = C.tennis_rankings()
-        ls = (now.year if now.month >= 7 else now.year - 1) - 1
-        last = C.soccer_standings(ls)
+    if watch:
         remaining = []
         for w in watch:
             if w["league"] in off_l:
@@ -233,9 +289,14 @@ def main():
                 continue
             c["prob"] = 0.5 + (c["prob"] - 0.5) * cal
             price = ph if c["sh"] else pa
+            P = c.get("pred", 0.6)
+            c["prob"] = P * c["prob"] + (1 - P) * price
             edge = c["prob"] - price
-            kl = C.kelly(c["prob"], price)
-            is_value = c["solid"] and edge >= min_e and edge <= C.MAX_EDGE and kl > 0
+            hold_ok = bool(c.get("solid")) and P >= 0.65 and not c.get("cross") and edge >= min_e and edge <= C.MAX_EDGE
+            kl = C.kelly(c["prob"], price, 0.02) if hold_ok else 0.0
+            is_value = hold_ok and kl > 0
+            sigtype = "✅ Hold — تا پایان بازی" if is_value else "🎯 Trade — خروج قبل از بازی"
+            size = f"تا {C.fa(round(kl*100,1))}٪ سرمایه" if is_value else "حداکثر ۱٪ (ترید کوتاه)"
             note = None
             if edge > C.MAX_EDGE:
                 note = "⚠️ لبه مشکوک (زیاد) — با احتیاط!"
@@ -244,10 +305,10 @@ def main():
             elif not is_value and edge < min_e:
                 note = f"❌ لبه کم ({C.fa(round(edge*100,1))}٪) — فقط برای اطلاع"
             stats = C.market_stats(ev, w["home"], w["away"], w["sport"])
-            stage = C.liq_stage(stats["liq"])
-            stage_line = f"💧 نقدینگی: {C.fa(int(stats['liq']))} دلار — {C.STAGE_FA[stage]}"
+            stage = C.liq_stage(stats["vol"])
+            stage_line = f"💰 حجم معامله‌شده: {C.fa(int(stats['vol']))} دلار — {C.STAGE_FA[stage]}\n💧 عمق دفتر سفارش: {C.fa(int(stats['liq']))} دلار"
             note = (note + "\n" + stage_line) if note else stage_line
-            a = {"title": "بازار باز شد + VALUE BET 💰" if is_value else "بازار Polymarket باز شد ⚡", "league": w["league"], "date": w["date"], "home": w["home"], "away": w["away"], "stronger": c["stronger"], "prob": c["prob"], "price": price, "edge": edge, "kelly": kl if is_value else 0, "label": "به‌وضوح نابرابر 🟠", "icon": "🎾" if w["sport"] == "tennis" else "⚽", "link": C.poly_link(ev), "note": note, "hcr": c.get("hcr"), "hlr": c.get("hlr"), "acr": c.get("acr"), "alr": c.get("alr"), "bh": c.get("bh"), "ba": c.get("ba")}
+            a = {"title": "بازار باز شد + VALUE BET 💰" if is_value else "بازار Polymarket باز شد ⚡", "league": w["league"], "date": w["date"], "home": w["home"], "away": w["away"], "stronger": c["stronger"], "prob": c["prob"], "price": price, "edge": edge, "kelly": kl if is_value else 0, "label": "به‌وضوح نابرابر 🟠", "icon": "🎾" if w["sport"] == "tennis" else "⚽", "link": C.poly_link(ev), "note": note, "sigtype": sigtype, "size": size, "hcr": c.get("hcr"), "hlr": c.get("hlr"), "acr": c.get("acr"), "alr": c.get("alr"), "hcty": c.get("hcty", ""), "acty": c.get("acty", ""), "bh": c.get("bh"), "ba": c.get("ba")}
             if only_v and not is_value:
                 known.append(str(ev.get("id")))
                 continue
@@ -259,22 +320,6 @@ def main():
                     links.append(f"{w['home']} vs {w['away']}\n{a['link']}")
             known.append(str(ev.get("id")))
         watch[:] = remaining
-        for e in fresh[:10]:
-            try:
-                a = analyze_ev(e, cur, last, tr, min_e, cal)
-                if a and a["league"] not in off_l and str(e.get("id")) not in noted:
-                    stats = C.market_stats(e, a["home"], a["away"], a["m"]["sport"])
-                    stage = C.liq_stage(stats["liq"])
-                    stage_line = f"💧 نقدینگی: {C.fa(int(stats['liq']))} دلار — {C.STAGE_FA[stage]}"
-                    a["note"] = (a["note"] + "\n" + stage_line) if a.get("note") else stage_line
-                    if C.notify("⚡", a):
-                        sent += 1
-                        noted.append(str(e.get("id")))
-                        preds.append({"home": a["home"], "away": a["away"], "sport": a["m"]["sport"], "slug": a["m"]["slug"], "date": a["date"], "prob": round(a["prob"], 3), "price": round(a["price"], 3), "stronger": a["stronger"], "link": a.get("link"), "liq0": stats["liq"], "vol0": stats["vol"], "eid": str(e.get("id")), "status": "open"})
-                        if a.get("link"):
-                            links.append(f"{a['home']} vs {a['away']}\n{a['link']}")
-            except Exception as ex:
-                print("ev err:", ex)
     st["preds"] = preds[-300:]
     st["last_links"] = links[-10:]
     st["flow"] = flow
