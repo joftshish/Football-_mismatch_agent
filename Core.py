@@ -1,16 +1,18 @@
-import httpx, json, math, os, unicodedata
+import httpx, json, math, os, time, unicodedata
 from datetime import datetime, timedelta, timezone
 
-VERSION = "core22"
+VERSION = "core25"
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 ESPN = "https://site.api.espn.com/apis"
 POLY = "https://gamma-api.polymarket.com"
 TZ = timezone(timedelta(hours=3, minutes=30))
 FAD = "".join(chr(1632 + i) for i in range(10))
-SOCCER = {"eng.1": "🏴 لیگ برتر انگلیس", "esp.1": "🇪🇸 لالیگا", "ger.1": "🇩🇪 بوندس‌لیگا", "ita.1": "🇮🇹 سری آ", "fra.1": "🇫🇷 لیگ ۱", "por.1": "🇵🇹 پرتغال", "ksa.1": "🇸🇦 عربستان", "eng.2": "🏴 Championship", "esp.2": "🇪🇸 Segunda", "usa.1": "🇺🇸 MLS", "bra.1": "🇧🇷 برزیل", "mex.1": "🇲🇽 مکزیک", "ned.1": "🇳🇱 هلند", "tur.1": "🇹🇷 ترکیه", "jpn.1": "🇯🇵 ژاپن", "ger.2": "🇩🇪 بوندس‌لیگا۲", "ita.2": "🇮 سری B", "eng.3": "🏴 League One", "fra.2": "🇫🇷 لیگ ۲", "arg.1": "🇦🇷 آرژانتین", "uefa.champions": "🇪🇺 لیگ قهرمانان اروپا", "uefa.europa": "🇪🇺 لیگ اروپا"}
+SOCCER = {"eng.1": "🏴 لیگ برتر انگلیس", "esp.1": "🇪🇸 لالیگا", "ger.1": "🇩 بوندس‌لیگا", "ita.1": "🇮 سری آ", "fra.1": "🇫 لیگ ۱", "por.1": "🇵 پرتغال", "ksa.1": "🇸 عربستان", "eng.2": "🏴 Championship", "esp.2": "🇪 Segunda", "usa.1": "🇺 MLS", "bra.1": "🇧 برزیل", "mex.1": "🇲 مکزیک", "ned.1": "🇳 هلند", "tur.1": "🇹 ترکیه", "jpn.1": "🇯 ژاپن", "ger.2": "🇩 بوندس‌لیگا۲", "ita.2": "🇮 سری B", "eng.3": "🏴 League One", "fra.2": "🇫 لیگ ۲", "arg.1": "🇦 آرژانتین", "sco.1": "🏴 اسکاتلند Premiership", "bel.1": "🇧 بلژیک Pro League", "gre.1": "🇬 یونان Super League", "aut.1": "🇦 اتریش Bundesliga", "sui.1": "🇨 سوئیس Super League", "den.1": "🇩 دانمارک Superliga", "nor.1": "🇳 نروژ Eliteserien", "swe.1": "🇸 سوئد Allsvenskan", "cro.1": "🇭 کرواسی HNL", "srb.1": "🇷 صربستان SuperLiga", "ukr.1": "🇺 اوکراین Premier", "cze.1": "🇨 چک First League", "pol.1": "🇵 لهستان Ekstraklasa", "rou.1": "🇷 رومانی Liga I", "aze.1": "🇦 آذربایجان Premier", "kaz.1": "🇰 قزاقستان Premier", "isr.1": "🇮 اسرائیل Premier", "uefa.champions": "🇪 لیگ قهرمانان اروپا", "uefa.europa": "🇪 لیگ اروپا"}
 VOLATILE = {"eng.2", "eng.3", "esp.2", "fra.2", "ita.2", "ger.2"}
-OFF = {"eng.1": 0, "esp.1": 0, "ger.1": 0, "ita.1": 0, "fra.1": 1, "por.1": 4, "bra.1": 4, "ned.1": 5, "arg.1": 5, "tur.1": 6, "ksa.1": 6, "mex.1": 6, "usa.1": 7, "jpn.1": 7, "eng.2": 8, "esp.2": 8, "ger.2": 8, "ita.2": 8, "fra.2": 8, "eng.3": 12}
+PREDICTABILITY = {"ger.1": 0.85, "por.1": 0.85, "esp.1": 0.80, "ita.1": 0.80, "ned.1": 0.80, "eng.1": 0.65, "fra.1": 0.65, "bra.1": 0.65, "bel.1": 0.65, "ksa.1": 0.60, "tur.1": 0.60, "arg.1": 0.60, "mex.1": 0.60, "gre.1": 0.60, "aut.1": 0.60, "usa.1": 0.55, "jpn.1": 0.55, "esp.2": 0.55, "ger.2": 0.55, "ita.2": 0.55, "fra.2": 0.55, "sco.1": 0.55, "sui.1": 0.55, "den.1": 0.55, "cro.1": 0.55, "srb.1": 0.55, "ukr.1": 0.55, "cze.1": 0.55, "pol.1": 0.55, "rou.1": 0.55, "eng.2": 0.50, "nor.1": 0.50, "swe.1": 0.50, "aze.1": 0.50, "kaz.1": 0.50, "isr.1": 0.50, "eng.3": 0.45, "uefa.champions": 0.60, "uefa.europa": 0.60}
+OFF = {"eng.1": 0, "esp.1": 0, "ger.1": 0, "ita.1": 0, "fra.1": 1, "por.1": 4, "bra.1": 4, "ned.1": 5, "arg.1": 5, "tur.1": 6, "ksa.1": 6, "mex.1": 6, "usa.1": 7, "jpn.1": 7, "eng.2": 8, "esp.2": 8, "ger.2": 8, "ita.2": 8, "fra.2": 8, "bel.1": 8, "eng.3": 12, "gre.1": 9, "aut.1": 9, "sco.1": 10, "sui.1": 10, "den.1": 10, "ukr.1": 10, "nor.1": 11, "swe.1": 11, "cro.1": 11, "cze.1": 11, "srb.1": 12, "pol.1": 12, "rou.1": 12, "isr.1": 13, "aze.1": 14, "kaz.1": 14}
+COUNTRY = {"eng.1": "🏴 انگلیس", "eng.2": "🏴 انگلیس", "eng.3": "🏴 انگلیس", "esp.1": "🇪🇸 اسپانیا", "esp.2": "🇪 اسپانیا", "ger.1": "🇩🇪 آلمان", "ger.2": "🇩🇪 آلمان", "ita.1": "🇮🇹 ایتالیا", "ita.2": "🇮 ایتالیا", "fra.1": "🇫🇷 فرانسه", "fra.2": "🇫🇷 فرانسه", "por.1": "🇵🇹 پرتغال", "ksa.1": "🇸 عربستان", "usa.1": "🇺🇸 آمریکا", "bra.1": "🇧 برزیل", "mex.1": "🇲 مکزیک", "ned.1": "🇳🇱 هلند", "tur.1": "🇹🇷 ترکیه", "jpn.1": "🇯🇵 ژاپن", "arg.1": "🇦🇷 آرژانتین", "sco.1": "🏴 اسکاتلند", "bel.1": "🇧🇪 بلژیک", "gre.1": "🇬🇷 یونان", "aut.1": "🇦🇹 اتریش", "sui.1": "🇨 سوئیس", "den.1": "🇩🇰 دانمارک", "nor.1": "🇳🇴 نروژ", "swe.1": "🇸 سوئد", "cro.1": "🇭🇷 کرواسی", "srb.1": "🇷🇸 صربستان", "ukr.1": "🇺🇦 اوکراین", "cze.1": "🇨 چک", "pol.1": "🇵🇱 لهستان", "rou.1": "🇷🇴 رومانی", "aze.1": "🇦🇿 آذربایجان", "kaz.1": "🇰 قزاقستان", "isr.1": "🇮 اسرائیل", "uefa.champions": "🇪 اروپا", "uefa.europa": "🇪 اروپا"}
 TENNIS = {"atp": "🎾 ATP", "wta": "🎾 WTA"}
 WD = ["شنبه", "یکشنبه", "دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه"]
 MO = ["فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور", "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"]
@@ -57,11 +59,11 @@ def model_prob(gap, soft=False):
         return 0.75
     return 0.65
 
-def kelly(p, price):
+def kelly(p, price, cap=0.02):
     if p <= price:
         return 0
     odds = 1 / price
-    return max(0, min(((p * odds - 1) / (odds - 1)) * 0.015, 0.02))
+    return max(0, min(((p * odds - 1) / (odds - 1)) * 0.015, cap))
 
 def send(text, html=True):
     try:
@@ -174,21 +176,6 @@ def tennis_fixtures(days=5):
                 print("tfx2 err", tour, ex)
         out += got
     return out
-
-def tennis_probe():
-    try:
-        r = httpx.get(f"{ESPN}/site/v2/sports/tennis/atp/scoreboard", timeout=15)
-        d = r.json()
-        evs = d.get("events", [])
-        if not evs:
-            return "events=0"
-        for ev in evs[:3]:
-            cs = ev.get("competitions", [{}])[0].get("competitors", [])
-            if cs:
-                return f"comp_keys={list(cs[0].keys())[:8]} | ath_keys={list((cs[0].get('athlete') or {}).keys())[:6]}"
-        return "raw=" + json.dumps(evs[0], ensure_ascii=False)[:250]
-    except Exception as ex:
-        return f"err: {ex}"
 
 def boost_of(d, eff_rank):
     played = d.get("played", 0)
@@ -331,21 +318,27 @@ def cross_info(name, cur, last):
                 continue
             if name in t:
                 d = t[name]
-                return min(24, OFF.get(slug, 10) + d.get("rank", DEFAULT_RANK) - 1), d
-    return 18, {}
+                return min(24, OFF.get(slug, 10) + d.get("rank", DEFAULT_RANK) - 1), d, slug
+    return 18, {}, None
 
 def compute(m, cur, last, tr):
     solid = False
     rsrc = "cur"
     hr = ar = None
     hcr = hlr = acr = alr = None
+    hcty = acty = ""
     bh = ba = None
     detail = None
+    P = 0.6
     cross = m["sport"] == "soccer" and m["slug"].startswith("uefa.")
     if m["sport"] == "soccer":
+        P = PREDICTABILITY.get(m["slug"], 0.6)
         if cross:
-            ehr, hd = cross_info(m["home"], cur, last)
-            ear, ad = cross_info(m["away"], cur, last)
+            P = 0.5
+            ehr, hd, slh = cross_info(m["home"], cur, last)
+            ear, ad, sla = cross_info(m["away"], cur, last)
+            hcty = COUNTRY.get(slh, "") if slh else ""
+            acty = COUNTRY.get(sla, "") if sla else ""
             hcr, acr = ehr, ear
             hlr = alr = None
             h_played = hd.get("played", 0)
@@ -377,6 +370,8 @@ def compute(m, cur, last, tr):
             hd, ad = t.get(m["home"], {}), t.get(m["away"], {})
             lh = last.get(m["slug"], {}).get(m["home"], {})
             la = last.get(m["slug"], {}).get(m["away"], {})
+            hcty = COUNTRY.get(m["slug"], "")
+            acty = hcty
             h_played = hd.get("played", 0)
             a_played = ad.get("played", 0)
             h_cur = h_played >= 5
@@ -433,6 +428,7 @@ def compute(m, cur, last, tr):
             solid = (h_cur and a_cur and h_played >= 8 and a_played >= 8) or ((not h_cur) and (not a_cur) and lh.get("played", 0) >= 20 and la.get("played", 0) >= 20)
             low = not (h_cur and a_cur)
     else:
+        P = 0.7
         hr = tr.get(m["slug"], {}).get(m["home"].lower().split()[-1])
         ar = tr.get(m["slug"], {}).get(m["away"].lower().split()[-1])
         if not hr or not ar:
@@ -455,7 +451,8 @@ def compute(m, cur, last, tr):
     prob = model_prob(gap, soft or cross)
     if cross or (m["sport"] == "soccer" and min(hd.get("played", 0), ad.get("played", 0)) < 8):
         prob = min(prob, 0.80)
-    return {"gap": gap, "thr": thr, "stronger": m["home"] if sh else m["away"], "sh": sh, "prob": prob, "low": low, "solid": solid, "hr": hr, "ar": ar, "rsrc": rsrc, "hcr": hcr, "hlr": hlr, "acr": acr, "alr": alr, "bh": bh, "ba": ba, "detail": detail, "cross": cross}
+    prob = min(prob, 0.50 + P * 0.40)
+    return {"gap": gap, "thr": thr, "stronger": m["home"] if sh else m["away"], "sh": sh, "prob": prob, "pred": P, "low": low, "solid": solid, "hr": hr, "ar": ar, "rsrc": rsrc, "hcr": hcr, "hlr": hlr, "acr": acr, "alr": alr, "hcty": hcty, "acty": acty, "bh": bh, "ba": ba, "detail": detail, "cross": cross}
 
 def load_state():
     if os.path.exists("state.json"):
@@ -472,6 +469,16 @@ def save_state(s):
     s["watchlist"] = s.get("watchlist", [])[-100:]
     s["last_links"] = s.get("last_links", [])[-10:]
     json.dump(s, open("state.json", "w"))
+
+def standings_cache_load(st):
+    c = st.get("stcache") or {}
+    ts = c.get("ts", 0)
+    if not ts or (time.time() - ts) > 6 * 3600:
+        return None
+    return c
+
+def standings_cache_save(st, cur, last, ls):
+    st["stcache"] = {"ts": time.time(), "cur": cur, "last": last, "ls": ls}
 
 def rank_of(cr, lr):
     def rr(x):
@@ -493,7 +500,9 @@ def notify(emoji, a):
         jd, tm = jalali(dt)
     except Exception:
         jd, tm = a["date"], ""
-    L = [f"{emoji} <b>{a['title']}</b>", "", f"🏆 لیگ: {a['league']}", f"📅 {jd} — ساعت {tm}", "", f"⚽ {a['home']}", f"🆚 {a['away']}"]
+    hc = a.get("hcty", "")
+    ac = a.get("acty", "")
+    L = [f"{emoji} <b>{a['title']}</b>", "", f"🏆 لیگ: {a['league']}", f"📅 {jd} — ساعت {tm}", "", f"⚽ {a['home']} {hc}".rstrip(), f"🆚 {a['away']} {ac}".rstrip()]
     if a.get("hcr") is not None or a.get("hlr") is not None:
         L += ["", "🏅 رتبه‌ها:", f"   {a['home']}: {rank_of(a.get('hcr'), a.get('hlr'))}", f"   {a['away']}: {rank_of(a.get('acr'), a.get('alr'))}"]
     elif a.get("hr") is not None:
@@ -502,8 +511,10 @@ def notify(emoji, a):
     if a.get("bh") is not None or a.get("ba") is not None:
         L += ["", "⚡ فرم نسبت به انتظار:", f"   {a['home']}: {btag(a.get('bh'))}", f"   {a['away']}: {btag(a.get('ba'))}"]
     L += ["", f"📊 نظر مدل: {fa(round(a['prob']*100))}٪ برد {a['stronger']}", f"💰 نظر بازار: {fa(round(a['price']*100))}٪ برد {a['stronger']}", f"📈 لبه: {fa(round(a['edge']*100,1))}٪"]
-    if a.get("kelly"):
-        L.append(f"💵 پیشنهاد Kelly: {fa(round(a['kelly']*100,1))}٪ سرمایه")
+    if a.get("sigtype"):
+        L.append(f"🎯 نوع: {a['sigtype']}")
+    if a.get("size"):
+        L.append(f"💵 سایز پیشنهادی: {a['size']}")
     L += ["", f"📋 {a['label']}"]
     if a.get("note"):
         L.append(a["note"])
@@ -518,7 +529,7 @@ def notify_watch(m, c):
     except Exception:
         jd, tm = m["date"], ""
     icon = "🎾" if m["sport"] == "tennis" else "⚽"
-    L = ["👀 <b>بازی نابرابر — منتظر بازار Polymarket</b>", "", f"🏆 لیگ: {m['league']}", f"📅 {jd} — ساعت {tm}", "", f"{icon} {m['home']}", f"🆚 {m['away']}"]
+    L = ["👀 <b>بازی نابرابر — منتظر بازار Polymarket</b>", "", f"🏆 لیگ: {m['league']}", f"📅 {jd} — ساعت {tm}", "", f"{icon} {m['home']} {c.get('hcty','')}".rstrip(), f"🆚 {m['away']} {c.get('acty','')}".rstrip()]
     if c.get("hcr") is not None or c.get("hlr") is not None:
         L += ["", "🏅 رتبه‌ها:", f"   {m['home']}: {rank_of(c.get('hcr'), c.get('hlr'))}", f"   {m['away']}: {rank_of(c.get('acr'), c.get('alr'))}"]
     if c.get("bh") is not None or c.get("ba") is not None:
