@@ -502,8 +502,9 @@ def notify(emoji, a):
         jd, tm = a["date"], ""
     hc = a.get("hcty", "")
     ac = a.get("acty", "")
-    L = [f"{emoji} <b>{a['title']}</b>", "", f"🏆 لیگ: {a['league']}", f"📅 {jd} — ساعت {tm}", "", f"⚽ {a['home']}" + (f" {hc}" if hc else ""),
-f"🆚 {a['away']}" + (f" {ac}" if ac else ""),
+    hline = f"⚽ {a['home']}" + (f" {hc}" if hc else "")
+    aline = f"🆚 {a['away']}" + (f" {ac}" if ac else "")
+    L = [f"{emoji} <b>{a['title']}</b>", "", f"🏆 لیگ: {a['league']}", f"📅 {jd} — ساعت {tm}", "", hline, aline]
     if a.get("hcr") is not None or a.get("hlr") is not None:
         L += ["", "🏅 رتبه‌ها:", f"   {a['home']}: {rank_of(a.get('hcr'), a.get('hlr'))}", f"   {a['away']}: {rank_of(a.get('acr'), a.get('alr'))}"]
     elif a.get("hr") is not None:
