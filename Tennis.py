@@ -23,9 +23,6 @@ def notify_tennis(m, c, price, edge, link):
     except Exception:
         jd, tm = m["date"], ""
     stronger = c["stronger"]
-    weaker = m["away"] if stronger == m["home"] else m["home"]
-    rs = c["hr"] if stronger == m["home"] else c["ar"]
-    rw = c["ar"] if stronger == m["home"] else c["hr"]
     L = [
         "🎾 <b>VALUE BET تنیس</b>",
         "",
@@ -78,7 +75,7 @@ def main():
             P = c.get("pred", 0.7)
             prob = P * c["prob"] + (1 - P) * price
             edge = prob - price
-            if 0.03 <= edge <= 0.20:
+            if 0.02 <= edge <= 0.20:
                 if notify_tennis(m, c, price, edge, C.poly_link(ev)):
                     noted.append(key)
                     sent += 1
