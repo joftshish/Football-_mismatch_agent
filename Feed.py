@@ -1,20 +1,42 @@
 import Core as C
-import json
 import traceback
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
-GENERIC = {"sports", "soccer", "all sports", "teams", "games", "polymarket",
-           "crypto", "bitcoin", "ethereum", "spanish", "english"}
+TAGS = ["soccer", "tennis", "basketball", "mma", "boxing", "baseball", "hockey", "american-football", "golf", "cricket", "rugby"]
+GENERIC = {"sports", "soccer", "all sports", "teams", "games", "polymarket", "crypto", "bitcoin", "ethereum"}
 
+def fetch_events():
+    out = []
+    seen = set()
+    for tag in TAGS:
+        for offset in (0, 200, 400):
+            try:
+                d = C.httpx.get(f"{C.POLY}/events", params={"closed": "false", "tag_slug": tag, "limit": 200, "offset": offset}, timeout=15).json()
+            except Exception as ex:
+                print("feed poly err", tag, offset, ex)
+                break
+            if not isinstance(d, list) or not d:
+                break
+            for e in d:
+                eid = str(e.get("id"))
+                if eid in seen:
+                    continue
+                seen.add(eid)
+                e["_tag"] = tag
+                out.append(e)
+            if len(d) < 200:
+                break
+    return out
 
 def fuzzy_find(name, tbl):
     n = C.norm(name)
+    if len(n) < 4:
+        return None
     for key, d in tbl.items():
         k = C.norm(key)
-        if n and len(n) >= 4 and (n in k or k in n):
+        if n in k or k in n:
             return d
     return None
-
 
 def team_info(name, cur, last):
     cr = lr = None
@@ -38,7 +60,6 @@ def team_info(name, cur, last):
             break
     return cr, lr, slug
 
-
 def league_label(ev, slug):
     if slug and slug in C.SOCCER:
         return C.SOCCER[slug]
@@ -46,23 +67,52 @@ def league_label(ev, slug):
         lb = (t.get("label") or "").strip()
         if lb and lb.lower() not in GENERIC:
             return lb
-    title = ev.get("title") or ""
-    return title[:40] if title else "رقابت نامشخص"
+    return "رقابت نامشخص"
 
+def split_title(title):
+    sep = " vs " if " vs " in title else (" v " if " v " in title else None)
+    if not sep:
+        return None
+    parts = [x.strip() for x in title.split(sep, 1)]
+    if len(parts) != 2 or not parts[0] or not parts[1]:
+        return None
+    return parts
+
+def digest_lines(evs, now, hours=72, cap=12):
+    up = []
+    for e in evs:
+        if C.is_closed(e):
+            continue
+        sd = e.get("startDate") or ""
+        try:
+            sdt = datetime.fromisoformat(sd.replace("Z", "+00:00"))
+        except Exception:
+            continue
+        if sdt <= now or sdt > now + timedelta(hours=hours):
+            continue
+        up.append((sdt, e))
+    up.sort(key=lambda x: x[0])
+    lines = []
+    for i, (sdt, e) in enumerate(up[:cap], 1):
+        parts = split_title((e.get("title") or "").strip())
+        if not parts:
+            continue
+        home, away = parts
+        jd, tm = C.jalali(sdt.astimezone(C.TZ))
+        lines.append(f"{C.fa(i)}. {home} - {away}\n   {jd} — {tm}\n   {C.poly_link(e)}")
+    return lines, len(up)
 
 def main():
-    print("=== Feed start ===")
+    print("=== Feed v3 start ===")
     st = C.load_state()
     prefs = st.get("prefs", {})
     if prefs.get("feed_off"):
         print("feed off")
         return
-
     seen = st.setdefault("feed_seen", [])
     seen_set = set(seen)
     now = datetime.now(timezone.utc)
     ls = (now.year if now.month >= 7 else now.year - 1) - 1
-
     cache = C.standings_cache_load(st)
     if cache and cache.get("ls") == ls:
         cur, last = cache["cur"], cache["last"]
@@ -70,40 +120,27 @@ def main():
         cur = C.soccer_standings()
         last = C.soccer_standings(ls)
         C.standings_cache_save(st, cur, last, ls)
+    evs = fetch_events()
+    print("feed events:", len(evs))
+    teh_now = now.astimezone(C.TZ)
+    today = teh_now.strftime("%Y-%m-%d")
 
-    # --- بارگذاری همه بازارهای فعال ---
-    evs = []
-    for tag in ["soccer", "tennis", "basketball", "mma", "boxing",
-                "baseball", "hockey", "american-football", "golf",
-                "motorsports", "cricket", "rugby"]:
-        try:
-            d = C.httpx.get(f"{C.POLY}/events",
-                            params={"closed": "false", "tag_slug": tag, "limit": 200},
-                            timeout=15).json()
-            if isinstance(d, list):
-                for e in d:
-                    e["_tag"] = tag
-                evs += d
-        except Exception as ex:
-            print(f"feed poly err {tag}: {ex}")
-
-    print(f"feed events: {len(evs)}, seen: {len(seen_set)}")
-
-    # --- بار اول: فقط ثبت و فعال‌سازی ---
     if not st.get("feed_init"):
         for e in evs:
             seen_set.add(str(e.get("id")))
         st["feed_init"] = True
+        lines, total = digest_lines(evs, now)
+        msg = f"📡 فید بازار Polymarket فعال شد\n{C.fa(len(seen_set))} بازار موجود ثبت شد.\nاز این به بعد:\n• هر بازار جدید بلافاصله اعلام می‌شه\n• هر روز یک فهرست از بازی‌های ۷۲ ساعت آینده می‌گیری"
+        if lines:
+            msg += f"\n\n📋 نخستین فهرست ({C.fa(total)} بازی پیشِ رو، {C.fa(len(lines))} تای اول):\n\n" + "\n\n".join(lines)
+        C.send(msg, html=False)
         st["feed_seen"] = list(seen_set)[-3000:]
+        st["feed_digest_date"] = today
         C.save_state(st)
-        C.send(f"📡 فید بازار Polymarket فعال شد\n"
-               f"{C.fa(len(seen_set))} بازار موجود بارگذاری شد؛ "
-               f"از این به بعد هر بازار جدید اعلام می‌شه (بدون تحلیل مدل)",
-               html=False)
-        print("feed init done", len(seen_set))
+        print("feed init done")
         return
 
-    # --- بازارهای جدید ---
+    sent = 0
     new = []
     for e in evs:
         eid = str(e.get("id"))
@@ -118,94 +155,42 @@ def main():
             seen_set.add(eid)
             continue
         new.append(e)
-
-    print(f"feed new: {len(new)}")
-
-    sent = 0
-    for e in new[:30]:
+    print("feed new:", len(new))
+    for e in new[:10]:
         eid = str(e.get("id"))
         seen_set.add(eid)
-
-        title = (e.get("title") or "").strip()
-        sep = " vs " if " vs " in title else (" v " if " v " in title else None)
-        if not sep:
+        parts = split_title((e.get("title") or "").strip())
+        if not parts:
             continue
-        parts = [x.strip() for x in title.split(sep, 1)]
-        if len(parts) != 2 or not parts[0] or not parts[1]:
-            continue
-
         home, away = parts
         crh, lrh, slh = team_info(home, cur, last)
         cra, lra, sla = team_info(away, cur, last)
         slug = slh or sla
         lab = league_label(e, slug)
-
         ch = C.COUNTRY.get(slh, "") if slh else ""
         ca = C.COUNTRY.get(sla, "") if sla else ""
-
         try:
-            dt = datetime.fromisoformat(
-                (e.get("startDate") or "").replace("Z", "+00:00")
-            ).astimezone(C.TZ)
-            jd, tm = C.jalali(dt)
+            sdt = datetime.fromisoformat((e.get("startDate") or "").replace("Z", "+00:00"))
+            jd, tm = C.jalali(sdt.astimezone(C.TZ))
         except Exception:
             jd, tm = "", ""
-
-        link = C.poly_link(e) or ""
-
-        # --- قیمت فعلی (اگه هست) ---
-        pline = ""
-        try:
-            mks = e.get("markets") or []
-            if mks:
-                oc = mks[0].get("outcomes")
-                pr = mks[0].get("outcomePrices")
-                if isinstance(oc, str):
-                    oc = json.loads(oc)
-                if isinstance(pr, str):
-                    pr = json.loads(pr)
-                if oc and pr and len(oc) == len(pr):
-                    pcs = []
-                    for i, o in enumerate(oc):
-                        pcs.append(f"{o}: {C.fa(round(float(pr[i])*100))}٪")
-                    pline = "💰 قیمت: " + " | ".join(pcs)
-        except Exception:
-            pass
-
         def rl(cr, lr):
-            c = C.fa(cr) if cr else "—"
-            l = C.fa(lr) if lr else "—"
-            return f"جاری {c}، قبل {l}"
-
-        sport_icon = "⚽" if e.get("_tag") == "soccer" else "🎾" if e.get("_tag") == "tennis" else "🏟️"
-
-        txt = (
-            f"📡 بازار جدید Polymarket\n"
-            f"\n"
-            f"{sport_icon} {home} {ch}\n"
-            f"🆚 {away} {ca}\n"
-            f"\n"
-            f"🏆 {lab}\n"
-            f"📅 {jd} — ساعت {tm}\n"
-            f"\n"
-            f"🏅 {home}: {rl(crh, lrh)}\n"
-            f"🏅 {away}: {rl(cra, lra)}\n"
-        )
-        if pline:
-            txt += f"{pline}\n"
-        txt += (
-            f"\n"
-            f"ℹ️ فقط مشاهده — تحلیل مدل جداست\n"
-            f"🔗 {link}"
-        )
-
-        if C.send(txt.strip(), html=False):
+            return f"جاری {C.fa(cr) if cr else '—'}، قبل {C.fa(lr) if lr else '—'}"
+        txt = f"📡 بازار جدید Polymarket\n⚽ {home} {ch}\n🆚 {away} {ca}\n🏆 {lab}\n📅 {jd} — ساعت {tm}\n🏅 {home}: {rl(crh, lrh)}\n🏅 {away}: {rl(cra, lra)}\nℹ️ فقط مشاهده — تحلیل مدل جداست\n🔗 {C.poly_link(e)}"
+        if C.send(txt, html=False):
             sent += 1
+
+    if st.get("feed_digest_date") != today and 9 <= teh_now.hour:
+        lines, total = digest_lines(evs, now)
+        if lines:
+            msg = f"📋 فهرست روزانهٔ بازارها ({C.fa(total)} بازی پیشِ رو، {C.fa(len(lines))} تای اول):\n\n" + "\n\n".join(lines)
+            if C.send(msg, html=False):
+                sent += 1
+        st["feed_digest_date"] = today
 
     st["feed_seen"] = list(seen_set)[-3000:]
     C.save_state(st)
-    print(f"feed done, sent: {sent}")
-
+    print("feed done, sent:", sent)
 
 if __name__ == "__main__":
     try:
@@ -214,7 +199,7 @@ if __name__ == "__main__":
         e = traceback.format_exc()
         print(e)
         try:
-            C.send("❌ خطای Feed:\n" + e[-2000:], html=False)
+            C.send("❌ خطای Feed:\n" + e[-1500:], html=False)
         except Exception:
             pass
         raise
